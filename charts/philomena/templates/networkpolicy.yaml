@@ -1,0 +1,65 @@
+{{- if .Values.networkPolicy.enabled }}
+{{- /* Every pod of this release, the app's as well as the subcharts'. */}}
+{{- $from := prepend .Values.networkPolicy.extraFrom (dict "podSelector" (dict "matchLabels" (dict "app.kubernetes.io/instance" .Release.Name))) }}
+{{- if .Values.opensearch.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "philomena.fullname" . }}-opensearch
+  labels:
+    {{- include "philomena.labels" . | nindent 4 }}
+  annotations:
+    kubernetes.io/description: "OpenSearch runs without authentication: only this release may reach it."
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "philomena.subchartSelector" (dict "ctx" . "name" "opensearch") | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        {{- toYaml $from | nindent 8 }}
+{{- end }}
+{{- if .Values.valkey.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "philomena.fullname" . }}-valkey
+  labels:
+    {{- include "philomena.labels" . | nindent 4 }}
+  annotations:
+    kubernetes.io/description: "Valkey runs without authentication: only this release may reach it."
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "philomena.subchartSelector" (dict "ctx" . "name" "valkey") | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        {{- toYaml $from | nindent 8 }}
+{{- end }}
+{{- if .Values.mediaproc.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "philomena.fullname" . }}-mediaproc
+  labels:
+    {{- include "philomena.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mediaproc
+  annotations:
+    kubernetes.io/description: "mediaproc runs without authentication: only this release may reach it."
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "philomena.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: mediaproc
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        {{- toYaml $from | nindent 8 }}
+{{- end }}
+{{- end }}

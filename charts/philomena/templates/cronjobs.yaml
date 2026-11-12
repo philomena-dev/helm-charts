@@ -1,0 +1,71 @@
+{{- if .Values.cron.enabled -}}
+{{- range .Values.cron.jobs }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "philomena.fullname" $ }}-{{ .name }}
+  labels:
+    {{- include "philomena.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: cron
+  annotations:
+    kubernetes.io/description: {{ printf "Scheduled Philomena task running %s." .command | quote }}
+    argocd.argoproj.io/sync-wave: "3"
+spec:
+  schedule: {{ .schedule | quote }}
+  {{- with .timeZone }}
+  timeZone: {{ . | quote }}
+  {{- end }}
+  suspend: {{ or $.Values.cron.suspend (.suspend | default false) }}
+  concurrencyPolicy: {{ $.Values.cron.concurrencyPolicy }}
+  successfulJobsHistoryLimit: {{ $.Values.cron.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ $.Values.cron.failedJobsHistoryLimit }}
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: {{ .activeDeadlineSeconds | default $.Values.cron.activeDeadlineSeconds }}
+      template:
+        metadata:
+          labels:
+            {{- include "philomena.selectorLabels" $ | nindent 12 }}
+            app.kubernetes.io/component: cron
+            {{- with $.Values.podLabels }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- with $.Values.podAnnotations }}
+          annotations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+        spec:
+          restartPolicy: Never
+          {{- include "philomena.appPodSpec" $ | nindent 10 }}
+          containers:
+            - name: {{ .name }}
+              image: {{ include "philomena.image" $ | quote }}
+              imagePullPolicy: {{ $.Values.image.pullPolicy }}
+              {{- with $.Values.securityContext }}
+              securityContext:
+                {{- toYaml . | nindent 16 }}
+              {{- end }}
+              workingDir: /srv/philomena
+              command:
+                - {{ .command }}
+              env:
+                {{- include "philomena.appEnv" $ | nindent 16 }}
+              {{- with include "philomena.envSecretName" $ }}
+              envFrom:
+                - secretRef:
+                    name: {{ . }}
+              {{- end }}
+              {{- with include "philomena.appVolumeMounts" $ | trim }}
+              volumeMounts:
+                {{- . | nindent 16 }}
+              {{- end }}
+              resources:
+                {{- toYaml (.resources | default $.Values.cron.resources) | nindent 16 }}
+          {{- with include "philomena.appVolumes" $ | trim }}
+          volumes:
+            {{- . | nindent 12 }}
+          {{- end }}
+{{- end }}
+{{- end }}

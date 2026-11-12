@@ -1,0 +1,139 @@
+name: Release Charts
+
+# Releases new chart versions and publishes the Helm repository, with its
+# landing page, to GitHub Pages (https://charts.philomena.dev).
+#
+# GitHub releases are the store of record: every chart version is a release
+# named "<chart>-<version>" with the package attached. Each run rebuilds the
+# whole site from them, so a failed run is fixed by running it again.
+#
+# Needs Settings > Pages > Source set to "GitHub Actions".
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - charts/**
+      - site/**
+      - scripts/build-site.py
+      - .github/workflows/release.yaml
+  workflow_dispatch:
+
+# One at a time, and never cancel a run that is in the middle of releasing.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+permissions: {}
+
+env:
+  # Public URL of the repository; the package URLs in index.yaml start with it
+  REPO_URL: https://charts.philomena.dev
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # tags and GitHub releases
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v5.1.0
+
+      - uses: actions/setup-python@v7.1.0
+        with:
+          python-version: '3.x'
+
+      - name: Install PyYAML
+        run: python3 -m pip install --quiet pyyaml
+
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: 24
+
+      # PhilomenaCSS, the stylesheet of the landing page (site/package.json)
+      - name: Install the stylesheet
+        run: npm ci --prefix site
+
+      # Packaging builds the subcharts, which needs their repositories to be
+      # known (keep in step with ct.yaml).
+      - name: Add dependency repositories
+        run: |
+          helm repo add opensearch https://opensearch-project.github.io/helm-charts/
+          helm repo add cnpg https://cloudnative-pg.github.io/charts
+          helm repo add valkey https://valkey.io/valkey-helm/
+
+      # A chart version is released once: changing a chart without raising
+      # its version publishes nothing (ct lint insists on the bump in PRs).
+      - name: Release chart versions that have no release yet
+        run: |
+          set -euo pipefail
+          mkdir -p .release
+          for chart in charts/*/Chart.yaml; do
+            dir=$(dirname "$chart")
+            # Top-level keys only: dependencies have names and versions too
+            name=$(helm show chart "$dir" | sed -n 's/^name: //p')
+            version=$(helm show chart "$dir" | sed -n 's/^version: //p')
+            tag="$name-$version"
+
+            if gh release view "$tag" > /dev/null 2>&1; then
+              echo "$tag is already released"
+              continue
+            fi
+
+            echo "::group::Releasing $tag"
+            helm package "$dir" --dependency-update --destination .release
+            # "Latest" on the repository page follows the philomena chart
+            latest=false
+            [ "$name" = philomena ] && latest=true
+            gh release create "$tag" ".release/$tag.tgz" \
+              --target "$GITHUB_SHA" \
+              --title "$tag" \
+              --notes "Helm chart \`$name\` $version. Install it from $REPO_URL." \
+              --latest="$latest"
+            echo "::endgroup::"
+          done
+
+      - name: Collect the packages of every release
+        run: |
+          set -euo pipefail
+          mkdir -p _site
+          gh release list --limit 1000 --exclude-drafts --json tagName,publishedAt > releases.json
+          for tag in $(jq -r '.[].tagName' releases.json); do
+            gh release download "$tag" --pattern '*.tgz' --dir _site \
+              || echo "::warning::Release $tag has no chart package"
+          done
+          ls -l _site
+
+      - name: Build the index and the landing page
+        run: |
+          set -euo pipefail
+          helm repo index _site --url "$REPO_URL"
+          python3 scripts/build-site.py --site _site \
+            --repo-url "$REPO_URL" \
+            --source-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
+            --releases releases.json
+
+      - name: Upload the site
+        uses: actions/upload-pages-artifact@v5.0.0
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5.0.1

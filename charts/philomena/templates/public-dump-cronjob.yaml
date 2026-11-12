@@ -1,0 +1,212 @@
+{{- if .Values.publicDump.enabled -}}
+{{- $pd := .Values.publicDump -}}
+{{- $s3 := $pd.s3 -}}
+{{- $_ := required "publicDump.s3.existingSecret is required" $s3.existingSecret -}}
+{{- $_ = required "publicDump.s3.endpoint is required" $s3.endpoint -}}
+{{- $_ = required "publicDump.s3.bucket is required" $s3.bucket -}}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "philomena.fullname" . }}-public-dump
+  labels:
+    {{- include "philomena.labels" . | nindent 4 }}
+    app.kubernetes.io/component: public-dump
+  annotations:
+    kubernetes.io/description: "Builds the anonymized public database dump and uploads it to S3."
+    argocd.argoproj.io/sync-wave: "3"
+spec:
+  schedule: {{ $pd.schedule | quote }}
+  {{- with $pd.timeZone }}
+  timeZone: {{ . | quote }}
+  {{- end }}
+  suspend: {{ $pd.suspend }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: {{ $pd.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ $pd.failedJobsHistoryLimit }}
+  jobTemplate:
+    spec:
+      # A run that fails is redone in full by the next one
+      backoffLimit: 0
+      {{- with $pd.activeDeadlineSeconds }}
+      activeDeadlineSeconds: {{ . }}
+      {{- end }}
+      template:
+        metadata:
+          labels:
+            {{- include "philomena.selectorLabels" . | nindent 12 }}
+            app.kubernetes.io/component: public-dump
+            {{- with .Values.podLabels }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- with .Values.podAnnotations }}
+          annotations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: {{ .Values.automountServiceAccountToken }}
+          {{- with $pd.podSecurityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.nodeSelector }}
+          nodeSelector:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.affinity }}
+          affinity:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.tolerations }}
+          tolerations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with include "philomena.imagePullSecrets" . }}
+          {{- . | nindent 10 }}
+          {{- end }}
+          initContainers:
+            # Throwaway PostgreSQL (sidecar: runs until the dump is uploaded)
+            - name: postgres
+              image: "{{ $pd.image.repository }}:{{ $pd.image.tag }}"
+              imagePullPolicy: {{ $pd.image.pullPolicy }}
+              restartPolicy: Always
+              {{- with $pd.scratch.parameters }}
+              args:
+                {{- range $k, $v := . }}
+                - -c
+                - {{ printf "%s=%v" $k $v | quote }}
+                {{- end }}
+              {{- end }}
+              env:
+                - name: PGDATA
+                  value: /scratch/pgdata
+                - name: POSTGRES_USER
+                  value: philomena
+                - name: POSTGRES_DB
+                  value: philomena
+                - name: POSTGRES_HOST_AUTH_METHOD
+                  value: trust
+                - name: POSTGRES_INITDB_ARGS
+                  value: "--locale-provider=icu --icu-locale=en-US"
+                - name: LANG
+                  value: en_US.utf8
+              startupProbe:
+                exec:
+                  command:
+                    - pg_isready
+                    - -h
+                    - 127.0.0.1
+                    - -U
+                    - philomena
+                periodSeconds: 2
+                failureThreshold: 150
+              volumeMounts:
+                - name: scratch
+                  mountPath: /scratch
+                - name: shm
+                  mountPath: /dev/shm
+              resources:
+                {{- toYaml $pd.scratch.resources | nindent 16 }}
+            # Copies the data, builds the public tables, writes the dump
+            - name: dump
+              image: "{{ $pd.image.repository }}:{{ $pd.image.tag }}"
+              imagePullPolicy: {{ $pd.image.pullPolicy }}
+              command:
+                - /bin/sh
+                - -c
+              args:
+                - |
+                  {{- include "philomena.publicDumpScript" . | nindent 18 }}
+              env:
+                {{- include "philomena.servicesEnv" . | nindent 16 }}
+                - name: SOURCE_HOST
+                  value: {{ include "philomena.publicDump.sourceHost" . | quote }}
+                - name: SCRATCH_USER
+                  value: philomena
+                - name: SCRATCH_DB
+                  value: philomena
+                - name: NAME_PREFIX
+                  value: {{ $pd.namePrefix | quote }}
+                - name: TABLES
+                  value: {{ $pd.tables | join " " | quote }}
+                - name: PARALLEL_JOBS
+                  value: {{ $pd.parallelJobs | int | quote }}
+                - name: WORK_MEM
+                  value: {{ $pd.workMem | quote }}
+              {{- with include "philomena.envSecretName" . }}
+              # IMAGE_URL_ROOT and BADGE_URL_ROOT for the published URLs
+              envFrom:
+                - secretRef:
+                    name: {{ . }}
+              {{- end }}
+              volumeMounts:
+                - name: scratch
+                  mountPath: /scratch
+                - name: sql
+                  mountPath: /config
+                  readOnly: true
+              resources:
+                {{- toYaml $pd.resources | nindent 16 }}
+          containers:
+            - name: upload
+              image: "{{ $pd.upload.image.repository }}:{{ $pd.upload.image.tag }}"
+              imagePullPolicy: {{ $pd.upload.image.pullPolicy }}
+              command:
+                - /bin/sh
+                - -c
+              args:
+                - |
+                  {{- include "philomena.publicDumpUploadScript" . | nindent 18 }}
+              env:
+                - name: S3_BUCKET
+                  value: {{ $s3.bucket | quote }}
+                - name: S3_PATH
+                  value: {{ $s3.path | quote }}
+                - name: RCLONE_CONFIG_DEST_TYPE
+                  value: s3
+                - name: RCLONE_CONFIG_DEST_PROVIDER
+                  value: {{ $s3.provider | quote }}
+                - name: RCLONE_CONFIG_DEST_ENDPOINT
+                  value: {{ $s3.endpoint | quote }}
+                - name: RCLONE_CONFIG_DEST_REGION
+                  value: {{ $s3.region | quote }}
+                # Needs no bucket listing or creation permission
+                - name: RCLONE_CONFIG_DEST_NO_CHECK_BUCKET
+                  value: "true"
+                - name: RCLONE_CONFIG_DEST_ACCESS_KEY_ID
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ $s3.existingSecret }}
+                      key: AWS_ACCESS_KEY_ID
+                - name: RCLONE_CONFIG_DEST_SECRET_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ $s3.existingSecret }}
+                      key: AWS_SECRET_ACCESS_KEY
+              volumeMounts:
+                - name: scratch
+                  mountPath: /scratch
+                  readOnly: true
+              resources:
+                {{- toYaml $pd.upload.resources | nindent 16 }}
+          volumes:
+            - name: scratch
+              ephemeral:
+                volumeClaimTemplate:
+                  spec:
+                    accessModes:
+                      - ReadWriteOnce
+                    {{- with $pd.scratch.storageClass }}
+                    storageClassName: {{ . }}
+                    {{- end }}
+                    resources:
+                      requests:
+                        storage: {{ $pd.scratch.size }}
+            - name: shm
+              emptyDir:
+                medium: Memory
+                sizeLimit: {{ $pd.scratch.shmSize }}
+            - name: sql
+              configMap:
+                name: {{ $pd.existingConfigMap | default (printf "%s-public-dump" (include "philomena.fullname" .)) }}
+{{- end }}

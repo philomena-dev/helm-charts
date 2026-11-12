@@ -1,0 +1,19 @@
+{{- if .Values.mediaproc.enabled -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "philomena.fullname" . }}-mediaproc
+  labels:
+    {{- include "philomena.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mediaproc
+spec:
+  type: {{ .Values.mediaproc.service.type }}
+  ports:
+    - port: {{ .Values.mediaproc.service.port }}
+      targetPort: mediaproc
+      protocol: TCP
+      name: mediaproc
+  selector:
+    {{- include "philomena.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: mediaproc
+{{- end }}

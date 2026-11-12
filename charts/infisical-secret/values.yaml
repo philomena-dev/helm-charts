@@ -1,0 +1,43 @@
+# Connection settings shared by every entry in `secrets` (each entry can
+# override projectSlug/envSlug).
+
+# Infisical API URL. The default is Infisical Cloud (US); use
+# https://eu.infisical.com/api for the EU region, or the URL of a self-hosted
+# instance, e.g. http://infisical.infisical.svc:8080/api inside the cluster.
+hostAPI: https://app.infisical.com/api
+# Infisical project slug; required when any secret is enabled.
+projectSlug: ""
+envSlug: prod
+# Universal-auth machine identity credentials used by the operator: a Secret
+# with "clientId" and "clientSecret" keys.
+credentialsRef:
+  secretName: universal-auth-credentials
+  secretNamespace: ""  # defaults to the release namespace
+# Seconds between two syncs. Unset leaves it to the operator's default, which
+# also keeps the field out of GitOps diffs.
+resyncInterval: null
+
+# Secrets to sync, keyed by a short lowercase name. Each enabled entry renders
+# one InfisicalSecret that syncs an Infisical folder into a managed Kubernetes
+# Secret. All fields are optional:
+#
+#   enabled: true          # set false to skip this entry
+#   secretsPath: /         # Infisical folder to sync
+#   recursive: false       # include subfolders
+#   projectSlug: ""        # overrides the top-level projectSlug
+#   envSlug: ""            # overrides the top-level envSlug
+#   secretName: ""         # managed Secret name; default "<release>-<key>"
+#   secretNamespace: ""    # defaults to the release namespace
+#   secretType: ""         # e.g. kubernetes.io/basic-auth; default Opaque
+#   creationPolicy: Owner  # Owner (deleted with the InfisicalSecret) or Orphan
+#
+# Parent charts rely on the "<release>-<key>" default to find the Secret, so
+# keep that naming in sync with their "*SecretName" helpers.
+secrets: {}
+#  env:
+#    secretsPath: /
+#    recursive: true
+#  database:
+#    secretsPath: /database
+#    secretName: myapp-postgres-auth
+#    secretType: kubernetes.io/basic-auth

@@ -1,0 +1,13 @@
+# Values used by chart-testing (ct lint) and kubeconform in CI only. The chart
+# renders nothing by default, so declare entries covering both secret shapes.
+projectSlug: ci-project
+secrets:
+  env:
+    secretsPath: /
+    recursive: true
+  database:
+    secretsPath: /database
+    secretName: ci-database-auth
+    secretType: kubernetes.io/basic-auth
+  disabled:
+    enabled: false

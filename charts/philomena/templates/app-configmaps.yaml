@@ -1,0 +1,27 @@
+{{- if .Values.siteConfig }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "philomena.fullname" . }}-site-config
+  labels:
+    {{- include "philomena.labels" . | nindent 4 }}
+    app.kubernetes.io/component: app
+data:
+  {{- range $file, $content := .Values.siteConfig }}
+  {{ $file }}: |
+    {{- $content | nindent 4 }}
+  {{- end }}
+{{- end }}
+{{- if .Values.purgeCache.script }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "philomena.fullname" . }}-purge-cache
+  labels:
+    {{- include "philomena.labels" . | nindent 4 }}
+    app.kubernetes.io/component: app
+data:
+  purge-cache: |
+    {{- .Values.purgeCache.script | nindent 4 }}
+{{- end }}

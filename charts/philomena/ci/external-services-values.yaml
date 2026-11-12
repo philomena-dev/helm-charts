@@ -1,0 +1,55 @@
+# Values used by chart-testing (ct lint) and kubeconform in CI only. Replaces
+# every bundled service with an external one.
+postgresql:
+  enabled: false
+valkey:
+  enabled: false
+opensearch:
+  enabled: false
+externalDatabase:
+  host: postgres.example.com
+  existingSecret: philomena-db
+externalValkey:
+  host: valkey.example.com
+externalOpensearch:
+  url: http://opensearch.example.com:9200
+mediaproc:
+  enabled: false
+externalMediaproc:
+  addr: mediaproc.example.com:1500
+existingSecret: philomena-env
+extraEnv:
+  - name: PHILOMENA_LOG
+    value: info
+service:
+  type: LoadBalancer
+  externalTrafficPolicy: Local
+web:
+  downtime: true
+  rateLimit:
+    enabled: false
+  extraEnv:
+    - name: EXAMPLE
+      value: "1"
+registryCredentials:
+  create: true
+  username: ci
+  password: ci-token
+setupJob:
+  restorePoint:
+    enabled: true
+  extraEnv:
+    - name: ACCEPT_USER_RENAMES
+      value: "1"
+cron:
+  suspend: true
+publicDump:
+  enabled: true
+  s3:
+    existingSecret: public-dump-s3
+    endpoint: https://s3.example.com
+    bucket: dumps
+    path: public
+# Selects nothing with every bundled service off, and must still render
+networkPolicy:
+  enabled: true

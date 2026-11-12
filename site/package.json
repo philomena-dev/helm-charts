@@ -1,0 +1,9 @@
+{
+  "name": "philomena-helm-charts-site",
+  "description": "Stylesheet of the landing page of the Helm repository (see scripts/build-site.py)",
+  "private": true,
+  "license": "MIT",
+  "dependencies": {
+    "@philomena/philomena-css": "0.4.0"
+  }
+}

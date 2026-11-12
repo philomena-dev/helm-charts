@@ -1,0 +1,62 @@
+Philomena {{ include "philomena.tag" . }} has been deployed.
+{{- if .Values.ingress.enabled }}
+
+URL: http{{ if .Values.ingress.tls }}s{{ end }}://{{ (first .Values.ingress.hosts).host }}
+{{- else if .Values.httpRoute.enabled }}
+{{- with .Values.httpRoute.hostnames }}
+
+URL: https://{{ first . }}
+{{- end }}
+{{- else if eq .Values.service.type "ClusterIP" }}
+
+Neither ingress nor httpRoute is enabled. To reach the site from your machine:
+  kubectl port-forward --namespace {{ .Release.Namespace }} svc/{{ include "philomena.fullname" . }} 8080:{{ .Values.service.port }}
+{{- end }}
+
+Service: {{ include "philomena.fullname" . }}:{{ .Values.service.port }} (Caddy sidecar in front of the app)
+{{- if eq .Values.service.type "LoadBalancer" }}
+
+Get the external LoadBalancer address with:
+  kubectl get svc {{ include "philomena.fullname" . }} --namespace {{ .Release.Namespace }} -w
+{{- end }}
+{{- if .Values.web.downtime }}
+
+DOWNTIME: the web sidecar answers every request with the downtime page.
+{{- end }}
+{{- with include "philomena.database" . | fromJson }}
+
+Database credentials are read from the Secret "{{ .secret }}"
+("username"/"password" keys).
+{{- end }}
+{{- if .Values.setupJob.enabled }}
+
+The setup-production Job ({{ include "philomena.fullname" . }}-setup-production) is
+kept until the next install or upgrade; its log shows what was migrated:
+  kubectl logs --namespace {{ .Release.Namespace }} job/{{ include "philomena.fullname" . }}-setup-production
+{{- if .Values.setupJob.restorePoint.enabled }}
+It also names the PostgreSQL restore point created before the migration,
+which a recovery can target to undo this upgrade's database changes.
+{{- end }}
+{{- else }}
+
+NOTE: setupJob.enabled is false, so the database and the search indexes
+were left alone. The app does not work until setup-production has run;
+upgrade with setupJob.enabled=true when the database is ready for it.
+{{- end }}
+{{- with include "philomena.envSecretName" . }}
+
+App environment variables are loaded from the Secret "{{ . }}".
+{{- else }}
+
+WARNING: no app env Secret is configured (set existingSecret or enable the
+infisical subchart); the app cannot start without its secrets.
+{{- end }}
+{{- if not (or .Values.mediaproc.enabled .Values.externalMediaproc.addr) }}
+
+NOTE: mediaproc is disabled and externalMediaproc.addr is unset; the app
+won't start unless MEDIAPROC_ADDR is set in its env Secret.
+{{- end }}
+{{- if or .Values.cron.suspend .Values.publicDump.suspend }}
+
+NOTE: scheduled jobs are suspended (cron.suspend / publicDump.suspend).
+{{- end }}

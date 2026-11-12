@@ -1,0 +1,16 @@
+apiVersion: v2
+name: infisical-secret
+description: Syncs Infisical folders into Kubernetes Secrets through the Infisical operator
+type: application
+version: 1.0.0
+home: https://github.com/philomena-dev/helm-charts
+sources:
+  - https://github.com/philomena-dev/helm-charts
+keywords:
+  - infisical
+  - secrets
+maintainers:
+  - name: Nighty
+    email: luna@nighty.cloud
+annotations:
+  artifacthub.io/license: MIT

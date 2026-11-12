@@ -1,0 +1,46 @@
+# A small site on one node, with everything in the cluster: bundled
+# PostgreSQL (needs the CloudNativePG operator), OpenSearch and Valkey, TLS
+# from cert-manager, and uploaded files served from the bucket by the web
+# sidecar.
+#
+#   helm install philomena philomena/philomena -n philomena -f minimal.yaml --timeout 30m
+
+# Secret made from philomena.env (see the README)
+existingSecret: philomena-env
+
+ingress:
+  enabled: true
+  className: traefik  # or leave out for the cluster's default class
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt
+  hosts:
+    - host: philomena.example
+    - host: cdn.philomena.example
+  tls:
+    - secretName: philomena-tls
+      hosts:
+        - philomena.example
+        - cdn.philomena.example
+
+web:
+  # Serve cdn.philomena.example from the S3 bucket of the env Secret
+  cdn:
+    enabled: true
+    hosts:
+      - cdn.philomena.example
+  # Only the ingress controller may set the client IP. Use your cluster's
+  # pod network here (k3s: 10.42.0.0/16).
+  trustedProxies:
+    - 10.42.0.0/16
+  # Not behind Cloudflare
+  clientIpHeaders:
+    - X-Forwarded-For
+
+postgresql:
+  cluster:
+    storage:
+      size: 20Gi
+
+opensearch:
+  persistence:
+    size: 20Gi

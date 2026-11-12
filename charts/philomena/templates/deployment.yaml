@@ -1,0 +1,131 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "philomena.fullname" . }}
+  labels:
+    {{- include "philomena.labels" . | nindent 4 }}
+    app.kubernetes.io/component: app
+  annotations:
+    kubernetes.io/description: "Philomena app with its Caddy web sidecar."
+    # Argo CD: rolled out after the setup Job (wave 2) has migrated
+    argocd.argoproj.io/sync-wave: "3"
+spec:
+  replicas: {{ .Values.replicaCount }}
+  {{- with .Values.strategy }}
+  strategy:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "philomena.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: app
+  template:
+    metadata:
+      labels:
+        {{- include "philomena.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: app
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      annotations:
+        checksum/caddyfile: {{ include "philomena.caddyfile" . | sha256sum }}
+        {{- with include "philomena.appChecksums" . | trim }}
+        {{- . | nindent 8 }}
+        {{- end }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- include "philomena.appPodSpec" . | nindent 6 }}
+      containers:
+        - name: philomena
+          image: {{ include "philomena.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          workingDir: /srv/philomena
+          env:
+            # Reached by the web sidecar on localhost and by the probes
+            - name: APP_IP
+              value: "0.0.0.0"
+            {{- include "philomena.appEnv" . | nindent 12 }}
+          {{- with include "philomena.envSecretName" . }}
+          envFrom:
+            - secretRef:
+                name: {{ . }}
+          {{- end }}
+          ports:
+            - name: app
+              containerPort: 4000
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.probes.liveness.path | default "/" | quote }}
+              port: app
+              scheme: HTTP
+            {{- with include "philomena.probeSettings" .Values.probes.liveness }}
+            {{- . | nindent 12 }}
+            {{- end }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.probes.readiness.path | default "/" | quote }}
+              port: app
+              scheme: HTTP
+            {{- with include "philomena.probeSettings" .Values.probes.readiness }}
+            {{- . | nindent 12 }}
+            {{- end }}
+          {{- with include "philomena.appVolumeMounts" . | trim }}
+          volumeMounts:
+            {{- . | nindent 12 }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+        # Caddy: serves the static assets baked into the web image and proxies
+        # everything else to the app.
+        - name: web
+          image: {{ include "philomena.webImage" . | quote }}
+          imagePullPolicy: {{ .Values.web.image.pullPolicy | default .Values.image.pullPolicy }}
+          {{- with .Values.web.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with include "philomena.webEnv" . }}
+          env:
+            {{- . | nindent 12 }}
+          {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.web.port }}
+              protocol: TCP
+          {{- if .Values.web.probes.liveness.enabled }}
+          livenessProbe:
+            tcpSocket:
+              port: http
+            {{- with include "philomena.probeSettings" .Values.web.probes.liveness }}
+            {{- . | nindent 12 }}
+            {{- end }}
+          {{- end }}
+          {{- if .Values.web.probes.readiness.enabled }}
+          readinessProbe:
+            tcpSocket:
+              port: http
+            {{- with include "philomena.probeSettings" .Values.web.probes.readiness }}
+            {{- . | nindent 12 }}
+            {{- end }}
+          {{- end }}
+          volumeMounts:
+            - name: caddyfile
+              mountPath: /etc/caddy/Caddyfile
+              subPath: Caddyfile
+              readOnly: true
+          resources:
+            {{- toYaml .Values.web.resources | nindent 12 }}
+      volumes:
+        - name: caddyfile
+          configMap:
+            name: {{ include "philomena.fullname" . }}-web
+        {{- with include "philomena.appVolumes" . | trim }}
+        {{- . | nindent 8 }}
+        {{- end }}

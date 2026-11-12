@@ -1,0 +1,7 @@
+# Values used by chart-testing (ct lint) and kubeconform in CI only. Renders
+# the optional infisical-secret subchart, without the setup Jobs.
+infisical:
+  enabled: true
+  projectSlug: ci-project
+setupJob:
+  enabled: false

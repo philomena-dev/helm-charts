@@ -1,0 +1,42 @@
+# Philomena as an Argo CD Application.
+#
+# No automated sync: a deploy is "change image.tag, commit, sync", and the
+# chart's preflight and setup Jobs run as part of every sync. No
+# resources-finalizer either, so deleting the Application never cascades
+# into deleting the database.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: philomena
+  namespace: argocd
+  annotations:
+    # Without it the OpenSearch StatefulSet shows as OutOfSync forever
+    # (defaulted fields in its volumeClaimTemplates)
+    argocd.argoproj.io/compare-options: ServerSideDiff=true
+spec:
+  project: default
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: philomena
+  source:
+    repoURL: https://charts.philomena.dev
+    chart: philomena
+    targetRevision: 1.0.0
+    helm:
+      releaseName: philomena
+      valuesObject:
+        image:
+          tag: "1.3.0"
+        existingSecret: philomena-env
+        ingress:
+          enabled: true
+          hosts:
+            - host: philomena.example
+        postgresql:
+          backups:
+            objectStore:
+              helmHook: false  # Argo CD treats Helm hooks as ephemeral
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

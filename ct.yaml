@@ -1,0 +1,11 @@
+# chart-testing configuration (ct lint, locally and in CI)
+chart-dirs:
+  - charts
+target-branch: main
+# Maintainer names are not GitHub usernames in this repo
+validate-maintainers: false
+# Repositories of the subcharts, so ct can build the dependencies
+chart-repos:
+  - opensearch=https://opensearch-project.github.io/helm-charts/
+  - cnpg=https://cloudnative-pg.github.io/charts
+  - valkey=https://valkey.io/valkey-helm/

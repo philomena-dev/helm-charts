@@ -1,0 +1,165 @@
+<!doctype html>
+<!--
+  Landing page of the Helm repository, styled with PhilomenaCSS
+  (https://github.com/Meow/PhilomenaCSS, pinned in site/package.json).
+  scripts/build-site.py fills in the chart cards (the CHART_CARDS marker)
+  from index.yaml and the @@NAME@@ tokens, and copies the stylesheet.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Philomena Helm Charts</title>
+    <meta name="description" content="Helm charts for running the Philomena imageboard on Kubernetes." />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%E2%8E%88%3C/text%3E%3C/svg%3E"
+    />
+    <link rel="stylesheet" href="philomena.min.css" />
+    <style>
+      /* The little the framework leaves to the page */
+      p {
+        line-height: var(--text-line-height);
+      }
+
+      main a:not(.button) {
+        color: var(--link-color);
+        text-decoration: underline;
+      }
+
+      .intro p {
+        max-width: 46rem;
+        font-size: var(--text-size-lg);
+      }
+
+      /* Chart cards are wider than the default auto column */
+      .chart-grid {
+        --grid-auto-column-width: 26rem;
+      }
+
+      .chart-grid > .card {
+        display: flex;
+        flex-flow: column;
+        gap: var(--spacing-lg);
+      }
+
+      .chart-grid > .card > * {
+        margin: 0;
+      }
+
+      /* The header band keeps its place at the top edge of the card */
+      .chart-grid > .card > .card-header {
+        margin: calc(-1 * var(--card-padding)) calc(-1 * var(--card-padding)) 0;
+      }
+
+      .chart-description {
+        flex: 1;
+      }
+
+      .syntax-comment {
+        color: var(--syntax-punctuation-color);
+      }
+
+      .syntax-command {
+        color: var(--syntax-command-color);
+      }
+
+      .syntax-flag {
+        color: var(--syntax-flag-color);
+      }
+
+      .site-footer {
+        color: var(--muted-text-color);
+        text-align: center;
+      }
+    </style>
+  </head>
+  <body>
+    <header class="header">
+      <a class="header-brand" href="@@REPO_URL@@/">
+        <span aria-hidden="true">⎈</span>
+        <span class="header-brand-text">Philomena Helm Charts</span>
+      </a>
+      <nav class="nav" aria-label="Links">
+        <a class="nav-link hidden-below-md" href="@@SOURCE_URL@@#deploying-philomena-on-kubernetes">Deployment guide</a>
+        <a class="nav-link" href="@@SOURCE_URL@@">GitHub</a>
+      </nav>
+    </header>
+
+    <main class="content-container">
+      <div class="content">
+        <div class="intro">
+          <h1>Philomena on Kubernetes</h1>
+          <p>
+            Helm charts for running <a href="https://github.com/philomena-dev/philomena">Philomena</a>, the imageboard
+            software behind Derpibooru and Furbooru. This page is also the Helm repository.
+          </p>
+        </div>
+
+        <section class="block">
+          <header class="block-header">
+            <span class="block-header-title">Usage</span>
+            <div class="block-header-actions">
+              <a href="@@SOURCE_URL@@#deploying-philomena-on-kubernetes">Deployment guide</a>
+            </div>
+          </header>
+          <div class="block-content">
+            <pre class="code-block"><span class="syntax-comment"># Add the repository</span>
+<span class="syntax-command">helm</span> repo add philomena @@REPO_URL@@
+<span class="syntax-command">helm</span> repo update
+
+<span class="syntax-comment"># Install Philomena; the deployment guide covers the Secret and the values</span>
+<span class="syntax-command">helm</span> install philomena philomena/philomena \
+  <span class="syntax-flag">--namespace</span> philomena <span class="syntax-flag">--create-namespace</span> \
+  <span class="syntax-flag">--set</span> existingSecret=philomena-env \
+  <span class="syntax-flag">--timeout</span> 30m</pre>
+          </div>
+        </section>
+
+        <h2>Charts</h2>
+        <div class="grid grid-cols-auto gap-lg chart-grid">
+<!-- CHART_CARDS -->
+        </div>
+
+        <h2>Before you install</h2>
+        <div class="grid grid-cols-auto gap-lg chart-grid">
+          <article class="card">
+            <header class="card-header"><h3>Configuration Secret</h3></header>
+            <p>
+              Philomena is configured through environment variables. The chart wires up the database, OpenSearch,
+              Valkey and mediaproc; secrets, domains, S3 and SMTP come from one Secret that you create from
+              <a href="@@SOURCE_URL@@/blob/main/examples/philomena.env">a template</a>.
+            </p>
+          </article>
+          <article class="card">
+            <header class="card-header"><h3>CloudNativePG</h3></header>
+            <p>
+              The bundled PostgreSQL is a CloudNativePG cluster, which needs
+              <a href="https://cloudnative-pg.io/">the operator</a> in the cluster. Not needed with
+              <code class="code-span">postgresql.enabled=false</code> and an external database.
+            </p>
+          </article>
+          <article class="card">
+            <header class="card-header"><h3>OpenSearch</h3></header>
+            <p>
+              The bundled OpenSearch needs <code class="code-span">vm.max_map_count</code> of at least 262144 on its
+              node. An external OpenSearch and an external Valkey can be used instead of the bundled ones.
+            </p>
+          </article>
+        </div>
+
+        <div class="alert alert-primary">
+          <a href="index.yaml">index.yaml</a> lists every released chart version, and the packages are served next to
+          it.
+        </div>
+
+        <footer class="site-footer">
+          <p>
+            ⎈ Philomena Helm charts · MIT License · built with
+            <a href="https://github.com/Meow/PhilomenaCSS">PhilomenaCSS</a> · updated @@UPDATED@@
+          </p>
+        </footer>
+      </div>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,71 @@
+{{- if and .Values.setupJob.enabled .Values.setupJob.preflight.enabled -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "philomena.fullname" . }}-preflight
+  labels:
+    {{- include "philomena.labels" . | nindent 4 }}
+    app.kubernetes.io/component: preflight
+  annotations:
+    kubernetes.io/description: "Checks with setup-production --preflight whether the release can be installed; a failure aborts the upgrade before the database is touched."
+    "helm.sh/hook": "pre-upgrade"
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": "hook-succeeded,before-hook-creation"
+    # Argo CD ignores the Helm hook annotations when it finds its own. It
+    # cannot tell an install from an upgrade, so the Job runs in every sync:
+    # after the database and OpenSearch (wave 0) are healthy, before the
+    # setup Job (wave 2) and the workloads (wave 3).
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/sync-wave: "1"
+    argocd.argoproj.io/hook-delete-policy: HookSucceeded,BeforeHookCreation
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: {{ .Values.setupJob.preflight.activeDeadlineSeconds }}
+  template:
+    metadata:
+      labels:
+        {{- include "philomena.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: preflight
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      restartPolicy: Never
+      {{- include "philomena.appPodSpec" . | nindent 6 }}
+      containers:
+        - name: preflight
+          image: {{ include "philomena.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          workingDir: /srv/philomena
+          env:
+            {{- include "philomena.setupEnv" . | nindent 12 }}
+          {{- with include "philomena.envSecretName" . }}
+          envFrom:
+            - secretRef:
+                name: {{ . }}
+          {{- end }}
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - |
+              {{- include "philomena.preflightScript" . | nindent 14 }}
+          {{- with .Values.extraVolumeMounts }}
+          volumeMounts:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.setupJob.resources | nindent 12 }}
+      {{- with .Values.extraVolumes }}
+      volumes:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

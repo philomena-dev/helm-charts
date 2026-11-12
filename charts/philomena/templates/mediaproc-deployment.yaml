@@ -1,0 +1,85 @@
+{{- if .Values.mediaproc.enabled -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "philomena.fullname" . }}-mediaproc
+  labels:
+    {{- include "philomena.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mediaproc
+  annotations:
+    kubernetes.io/description: "Philomena media processor."
+    argocd.argoproj.io/sync-wave: "3"
+spec:
+  replicas: {{ .Values.mediaproc.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "philomena.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: mediaproc
+  template:
+    metadata:
+      labels:
+        {{- include "philomena.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: mediaproc
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      automountServiceAccountToken: {{ .Values.automountServiceAccountToken }}
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.mediaproc.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.mediaproc.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.mediaproc.tolerations | default .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with include "philomena.imagePullSecrets" . }}
+      {{- . | nindent 6 }}
+      {{- end }}
+      containers:
+        - name: philomena-mediaproc
+          image: {{ include "philomena.mediaprocImage" . | quote }}
+          imagePullPolicy: {{ .Values.mediaproc.image.pullPolicy | default .Values.image.pullPolicy }}
+          {{- with .Values.mediaproc.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          ports:
+            - name: mediaproc
+              containerPort: 1500
+              protocol: TCP
+          {{- if .Values.mediaproc.probes.liveness.enabled }}
+          livenessProbe:
+            tcpSocket:
+              port: mediaproc
+            {{- with include "philomena.probeSettings" .Values.mediaproc.probes.liveness }}
+            {{- . | nindent 12 }}
+            {{- end }}
+          {{- end }}
+          {{- if .Values.mediaproc.probes.readiness.enabled }}
+          readinessProbe:
+            tcpSocket:
+              port: mediaproc
+            {{- with include "philomena.probeSettings" .Values.mediaproc.probes.readiness }}
+            {{- . | nindent 12 }}
+            {{- end }}
+          {{- end }}
+          {{- with .Values.mediaproc.extraEnv }}
+          env:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.mediaproc.resources | nindent 12 }}
+{{- end }}

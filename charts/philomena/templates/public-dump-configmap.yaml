@@ -1,0 +1,12 @@
+{{- if and .Values.publicDump.enabled (not .Values.publicDump.existingConfigMap) -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "philomena.fullname" . }}-public-dump
+  labels:
+    {{- include "philomena.labels" . | nindent 4 }}
+    app.kubernetes.io/component: public-dump
+data:
+  public-dump.sql: |
+    {{- .Files.Get "files/public-dump.sql" | nindent 4 }}
+{{- end }}

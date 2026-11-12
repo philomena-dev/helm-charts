@@ -1,0 +1,746 @@
+# Default values for the philomena chart.
+#
+# The resource defaults fit a small site on a single node; see
+# examples/production.yaml in the repository for a sized-up starting point.
+
+nameOverride: ""
+fullnameOverride: ""
+
+# Philomena is released as three images that move together: the app
+# (this block; also runs the worker, the setup Jobs and the cron jobs), the
+# web server (web.image) and the media processor (mediaproc.image).
+image:
+  repository: ghcr.io/philomena-dev/philomena
+  # Version of all three images. Empty = the chart's appVersion. This is the
+  # one place to change on a release; web.image.tag and mediaproc.image.tag
+  # follow it unless they are set themselves.
+  tag: ""
+  # Optional image digest (e.g. "sha256:..."); takes precedence over the tag,
+  # for this image only. Prefer pinning by digest when the tag moves, since a
+  # moving tag with IfNotPresent can leave nodes running different builds.
+  digest: ""
+  # Also the default for web.image.pullPolicy and mediaproc.image.pullPolicy
+  pullPolicy: IfNotPresent
+  # Names of existing image pull Secrets, used by every pod of the chart
+  pullSecrets: []
+
+# Create a docker-registry Secret for private images and use it as a pull
+# Secret. Prefer an existing Secret via image.pullSecrets; this one keeps the
+# token in the values.
+registryCredentials:
+  create: false
+  secretName: registry-credentials
+  registry: ghcr.io
+  username: ""
+  password: ""  # for GHCR: a token with the read:packages scope
+  email: ""     # optional
+
+# ---------------------------------------------------------------------------
+# Configuration of the app
+# ---------------------------------------------------------------------------
+
+# Existing Secret whose keys become the environment of the app, worker, setup
+# Jobs and cron jobs (envFrom). Everything Philomena reads from the
+# environment and the chart does not inject itself goes here; see "App
+# configuration" in the README. Takes precedence over the Infisical-synced
+# Secret below.
+existingSecret: ""
+
+# Non-secret environment variables for the same containers, as a map. Handy
+# for the settings that are not worth hiding, so they can live next to the
+# rest of the values:
+env: {}
+#  APP_ORIGIN: https://philomena.example
+#  SITE_DOMAINS: philomena.example,www.philomena.example
+#  CDN_HOST: cdn.philomena.example
+
+# The same as a list of EnvVar, for entries that need valueFrom. Entries here
+# and in env win over the same keys in the Secret. Do not repeat a name
+# across env, extraEnv and the variables the chart injects (PORT,
+# DATABASE_URL, PG*, REDIS_HOST, OPENSEARCH_URL, MEDIAPROC_ADDR).
+extraEnv: []
+# - name: PHILOMENA_LOG
+#   value: info
+
+# Site configuration files that replace the ones baked into the app image
+# (config/*.json in the Philomena source: avatar.json, footer.json,
+# quick_tag_table.json, tag.json). Each key is a file name, each value its
+# content. Changing them restarts the app and the worker.
+siteConfig: {}
+#  footer.json: |
+#    {"cols": ["Site"], "Site": [{"title": "Rules", "url": "/rules"}]}
+
+# Script the app calls to purge URLs from the CDN cache when images are
+# hidden, deleted or replaced. It replaces the no-op
+# /usr/local/bin/purge-cache of the image, receives {"files": [urls...]} as
+# its first argument and runs with the app's environment (busybox sh and
+# wget are available). Empty keeps the no-op.
+purgeCache:
+  script: ""
+  #  script: |
+  #    #!/bin/sh
+  #    set -e
+  #    wget -qO /dev/null \
+  #      --header "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+  #      --header "Content-Type: application/json" \
+  #      --post-data "$1" \
+  #      "https://api.cloudflare.com/client/v4/zones/$CLOUDFLARE_ZONE_ID/purge_cache"
+
+# Extra volumes and mounts for the containers running the app image
+extraVolumes: []
+extraVolumeMounts: []
+
+# Optional Infisical sync through the infisical-secret subchart (requires the
+# Infisical operator). See its values for all options.
+infisical:
+  enabled: false
+  # hostAPI: https://app.infisical.com/api
+  projectSlug: ""  # required when enabled
+  envSlug: prod
+  credentialsRef:
+    secretName: universal-auth-credentials
+    secretNamespace: ""  # defaults to the release namespace
+  secrets:
+    # App environment, synced into "<release>-env" (or secretName) and loaded
+    # via envFrom unless existingSecret is set.
+    env:
+      secretsPath: /
+      recursive: true
+
+# ---------------------------------------------------------------------------
+# App
+# ---------------------------------------------------------------------------
+
+replicaCount: 1
+
+# Rollout strategy of the app Deployment (Kubernetes default when empty)
+strategy: {}
+
+resources:
+  requests:
+    cpu: 500m
+    memory: 1Gi
+  limits:
+    # The Erlang VM starts one scheduler per CPU of the limit
+    cpu: "4"
+    memory: 4Gi
+
+# HTTP probes against the app itself (port 4000). Everything besides "path"
+# is passed to the probe as is.
+probes:
+  liveness:
+    path: /robots.txt
+    initialDelaySeconds: 30
+    periodSeconds: 15
+    timeoutSeconds: 5
+  readiness:
+    path: /robots.txt
+    initialDelaySeconds: 15
+    periodSeconds: 10
+    timeoutSeconds: 5
+
+# Scheduling for the pods running the app image (app, worker, setup Jobs,
+# cron jobs) and for the public dump
+nodeSelector: {}
+#  philomena.dev/role: app
+tolerations: []
+affinity: {}
+
+podAnnotations: {}
+podLabels: {}
+
+# Pod-level security context of every pod the chart creates, except the
+# public dump's (publicDump.podSecurityContext).
+podSecurityContext:
+  seccompProfile:
+    type: RuntimeDefault
+
+# Security context of the containers running the app image. The image runs
+# as the unprivileged "philomena" user (1000).
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+
+# None of the workloads talk to the Kubernetes API
+automountServiceAccountToken: false
+
+# ---------------------------------------------------------------------------
+# Web server: a Caddy sidecar in the app pod (the philomena-web image)
+# ---------------------------------------------------------------------------
+
+# It serves the static assets baked into the image (CSS, JS, fonts, favicon)
+# with long cache headers and compression, applies rate limiting and the
+# upload size limit, and proxies everything else to the app on
+# localhost:4000. The Caddyfile is generated from these values (see
+# philomena.caddyfile in templates/_helpers.tpl).
+web:
+  image:
+    repository: ghcr.io/philomena-dev/philomena-web
+    tag: ""         # empty = image.tag
+    digest: ""
+    pullPolicy: ""  # empty = image.pullPolicy
+  # Port Caddy listens on inside the pod (the Service targets it)
+  port: 8080
+  # Proxies whose client IP headers are trusted: "private_ranges" or CIDRs.
+  # Narrow this to where your ingress controller's requests come from (e.g.
+  # the pod CIDR): with private_ranges, any pod in the cluster can pose as
+  # any visitor.
+  trustedProxies:
+    - private_ranges
+  # Headers the client IP is read from when the request comes from a trusted
+  # proxy, in order. Drop CF-Connecting-IP when the site is not behind
+  # Cloudflare, or make sure your proxy overwrites it.
+  clientIpHeaders:
+    - CF-Connecting-IP
+    - X-Forwarded-For
+  # Per-client-IP request limit; over-limit requests get the 50x error page
+  rateLimit:
+    enabled: true
+    events: 30
+    window: 5s
+  # Largest accepted request body (uploads)
+  maxBodySize: 130MiB
+  # Answer every request with the downtime page (503). Changing it restarts
+  # the app pods.
+  downtime: false
+  # Serve the CDN domain (uploaded images, avatars, badges, ...) from the S3
+  # bucket, like upstream's web server does. Off by default: larger sites
+  # serve it from a proxy or CDN outside the cluster instead. Expects the
+  # layout of upstream's .env-example (URL roots /img, /avatars, /spns,
+  # /badges, /tags; file roots images, avatars, adverts, badges, tags).
+  cdn:
+    enabled: false
+    # Host names of the CDN domain (CDN_HOST of the app). Add them to the
+    # Ingress or HTTPRoute as well.
+    hosts: []
+    # - cdn.philomena.example
+    s3:
+      # Empty = S3_BUCKET of the app's env Secret
+      bucket: ""
+      # e.g. https://<account>.r2.cloudflarestorage.com. Empty = built from
+      # S3_SCHEME, S3_HOST and S3_PORT of the app's env Secret.
+      endpoint: ""
+      region: auto
+      usePathStyle: true
+      # Secret with AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY keys. Empty =
+      # the app's env Secret. A read-only key for the bucket is enough.
+      existingSecret: ""
+  # Full Caddyfile replacing the generated one (must listen on web.port)
+  config: ""
+  # Extra environment variables (list of EnvVar)
+  extraEnv: []
+  # TCP probes on the Caddy port. Everything besides "enabled" is passed to
+  # the probe as is.
+  probes:
+    liveness:
+      enabled: true
+      initialDelaySeconds: 10
+      periodSeconds: 20
+    readiness:
+      enabled: true
+      initialDelaySeconds: 3
+      periodSeconds: 10
+  # Runs Caddy as an unprivileged user. NET_BIND_SERVICE has to stay
+  # available: the caddy binary carries it as a file capability and cannot
+  # be executed without it ("operation not permitted").
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+      add:
+        - NET_BIND_SERVICE
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+
+# Service in front of the web sidecar. It serves plain HTTP; terminate TLS at
+# the Ingress, the Gateway or upstream of the cluster. Without an ingress
+# controller, set type to LoadBalancer or NodePort to expose it directly.
+service:
+  type: ClusterIP
+  port: 80
+  nodePort: null  # fixed port for type NodePort
+  annotations: {}  # e.g. cloud provider LB configuration
+  loadBalancerIP: ""  # request a specific LB IP (provider-dependent)
+  loadBalancerClass: ""  # e.g. "metallb" when multiple LB implementations exist
+  loadBalancerSourceRanges: []  # CIDRs allowed to reach the LB
+  externalTrafficPolicy: ""  # "Local" preserves client source IPs
+
+ingress:
+  enabled: false
+  className: ""  # empty = the cluster's default IngressClass
+  annotations: {}
+  #  cert-manager.io/cluster-issuer: letsencrypt
+  hosts:
+    - host: philomena.example
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+  #  - secretName: philomena-tls
+  #    hosts:
+  #      - philomena.example
+
+# Gateway API alternative to the Ingress (needs the Gateway API CRDs and a
+# Gateway to attach to)
+httpRoute:
+  enabled: false
+  annotations: {}
+  parentRefs: []
+  #  - name: gateway
+  #    namespace: gateway-system
+  #    sectionName: https
+  hostnames: []
+  #  - philomena.example
+
+# ---------------------------------------------------------------------------
+# Worker: background jobs (thumbnails, indexing, notifications)
+# ---------------------------------------------------------------------------
+
+worker:
+  enabled: true
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "4"
+      memory: 4Gi
+
+# ---------------------------------------------------------------------------
+# Media processor (required by the app)
+# ---------------------------------------------------------------------------
+
+# The chart injects MEDIAPROC_ADDR=<fullname>-mediaproc:<port> into the app,
+# worker, setup Jobs and cron jobs. Disable it to use externalMediaproc.addr
+# instead.
+mediaproc:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: ghcr.io/philomena-dev/mediaproc
+    tag: ""         # empty = image.tag
+    digest: ""
+    pullPolicy: ""  # empty = image.pullPolicy
+  service:
+    type: ClusterIP
+    port: 1500
+  # TCP probes on the RPC port; uploads fail while mediaproc is down, so
+  # readiness gating matters during rollouts. Everything besides "enabled"
+  # is passed to the probe as is.
+  probes:
+    liveness:
+      enabled: true
+      initialDelaySeconds: 10
+      periodSeconds: 20
+    readiness:
+      enabled: true
+      initialDelaySeconds: 3
+      periodSeconds: 10
+  # Extra environment variables (list of EnvVar)
+  extraEnv:
+    - name: RUST_LOG
+      value: info
+  # The image runs as the unprivileged "mediaproc" user (1000)
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+  # Video and large image processing is memory hungry and bursts; large
+  # sites run mediaproc with 16 to 24Gi and 8 to 16 CPUs.
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: "4"
+      memory: 8Gi
+  nodeSelector: {}
+  tolerations: []  # empty = the top-level tolerations
+  affinity: {}
+
+# ---------------------------------------------------------------------------
+# setup-production Jobs
+# ---------------------------------------------------------------------------
+
+# Both run in the app image, as Helm hooks and as Argo CD sync hooks: the
+# preflight check ("setup-production --preflight") fails an upgrade before
+# the database is touched when the release needs a decision first; the setup
+# Job initializes or migrates the database and the search indexes before the
+# new workloads roll out. Helm waits for hooks, so run upgrades with a
+# --timeout longer than the migration (the default is 5m).
+setupJob:
+  # Disable to bring up the services without touching the database, e.g. to
+  # restore a dump first (see "Moving an existing site" in the README).
+  enabled: true
+  # Give up if the setup Job hasn't finished within this time. Unset by
+  # default: release migrations on a large database can run for hours, and a
+  # killed job leaves a step half-applied.
+  activeDeadlineSeconds: null
+  # Database connections for the setup container (the app Secret's POOL_SIZE
+  # is for the app)
+  poolSize: 3
+  # Extra environment variables for the preflight and setup containers only
+  # (list of EnvVar), e.g. the decisions a release asks for
+  extraEnv: []
+  # - name: ACCEPT_USER_RENAMES
+  #   value: "1"
+  preflight:
+    enabled: true
+    activeDeadlineSeconds: 600
+  # Before migrating, create a named PostgreSQL restore point, switch WAL and
+  # wait until that segment has been archived, so the database can be
+  # recovered to the state right before the upgrade. Needs working WAL
+  # archiving (postgresql.backups.*) and EXECUTE on pg_create_restore_point
+  # and pg_switch_wal for the app role (granted by the default
+  # postgresql.cluster.initdb.postInitApplicationSQL). The upgrade fails when
+  # the segment is not archived within the timeout, so enable it only once
+  # the first base backup exists and the archiver has caught up.
+  restorePoint:
+    enabled: false
+    # Name prefix; the image tag and a UTC timestamp are appended. The full
+    # name is printed in the setup Job's log.
+    namePrefix: before
+    archiveTimeoutSeconds: 300
+  # Building the search indexes runs one batch task per Erlang scheduler,
+  # and the VM starts one scheduler per CPU of the limit. Raise the limits
+  # before the first run against a large database: on a site with millions
+  # of images, 2 CPUs take hours where 16 take minutes.
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "4"
+      memory: 4Gi
+
+# ---------------------------------------------------------------------------
+# Scheduled maintenance tasks
+# ---------------------------------------------------------------------------
+
+# Kubernetes CronJobs in the app image, with the environment of the app.
+cron:
+  enabled: true
+  # Suspend every job without removing the CronJobs, e.g. while a release
+  # migrates or a dump is restored
+  suspend: false
+  # Don't start a new run while the previous one is still going
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  # Give up if a run hasn't finished within this time
+  # (can be overridden per job)
+  activeDeadlineSeconds: 600
+  # Can be overridden per job
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+  # name, schedule and command are required; suspend, timeZone,
+  # activeDeadlineSeconds and resources are optional. Schedules run in UTC
+  # unless an IANA time zone is set (timeZone: Europe/Berlin).
+  jobs:
+    - name: cron
+      schedule: "*/5 * * * *"
+      command: /usr/local/bin/run-cron
+    - name: cron-daily
+      schedule: "0 8 * * *"
+      command: /usr/local/bin/run-cron-daily
+      # Rebuilding the autocomplete index and cleaning up tags take a while
+      # on a large site
+      activeDeadlineSeconds: 3600
+
+# ---------------------------------------------------------------------------
+# Anonymized public database dump
+# ---------------------------------------------------------------------------
+
+# A CronJob. Each run copies the public schema's structure and the data of
+# the tables below into a throwaway PostgreSQL running as a sidecar of the
+# Job pod, builds the published tables there with files/public-dump.sql
+# (hidden images, anonymous authorship, private forums and all personal data
+# removed), writes a pg_dump archive "<namePrefix>_<YYYY_MM_DD>.pgdump" plus
+# a latest.json (file, size, sha256, created_at) and uploads both to an S3
+# bucket with rclone. Serving the files is left to whatever fronts the CDN.
+# Needs Kubernetes 1.29+ (sidecar containers) and a pod security context
+# that lets the postgres image start as root (the default).
+publicDump:
+  enabled: false
+  schedule: "0 4 * * *"
+  # IANA time zone for the schedule ("" = UTC)
+  timeZone: ""
+  suspend: false
+  namePrefix: philomena_public_dump
+  # Database host to read from. Defaults to the bundled cluster's read-only
+  # service when it has replicas, otherwise to the primary (or to
+  # externalDatabase.host).
+  sourceHost: ""
+  # Tables whose data is copied; nothing else is read from the database.
+  # The SQL builds the published tables from these.
+  tables:
+    - artist_links
+    - badge_awards
+    - badges
+    - comments
+    - duplicate_reports
+    - forums
+    - galleries
+    - gallery_interactions
+    - image_faves
+    - image_features
+    - image_intensities
+    - image_sources
+    - image_taggings
+    - images
+    - posts
+    - source_changes
+    - tag_change_tags
+    - tag_changes
+    - tags
+    - tags_implied_tags
+    - topics
+    - users
+  # Parallel pg_dump/pg_restore jobs for the copy
+  parallelJobs: 4
+  # work_mem of the transformation transaction (memory of the sidecar)
+  workMem: 1GB
+  # Use your own SQL instead of files/public-dump.sql: name of a ConfigMap
+  # with a "public-dump.sql" key. It receives the same psql variables.
+  existingConfigMap: ""
+  # PostgreSQL image for the sidecar and the client tools; its major version
+  # must match the database's
+  image:
+    repository: postgres
+    tag: 18.6-alpine
+    pullPolicy: IfNotPresent
+  podSecurityContext:
+    seccompProfile:
+      type: RuntimeDefault
+  # Throwaway PostgreSQL sidecar and the volume shared with it (ephemeral
+  # PVC; holds the copied data, the scratch database and the final dump, so
+  # size it at roughly three times the public tables). The run is write
+  # heavy: keep the volume off the database's disk when you can.
+  scratch:
+    size: 50Gi
+    storageClass: ""  # empty = cluster default
+    # Server settings; nothing in this database needs to survive a crash
+    parameters:
+      fsync: "off"
+      synchronous_commit: "off"
+      full_page_writes: "off"
+      shared_buffers: 1GB
+      maintenance_work_mem: 1GB
+      max_wal_size: 4GB
+    # /dev/shm for parallel restore and large sorts
+    shmSize: 1Gi
+    resources:
+      requests:
+        cpu: "1"
+        memory: 2Gi
+      limits:
+        memory: 4Gi
+  # Where the dumps go
+  s3:
+    # Existing Secret with AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY keys
+    # (required when enabled). Use a key scoped to this bucket, not the app's.
+    existingSecret: ""
+    endpoint: ""  # e.g. https://<account>.r2.cloudflarestorage.com
+    bucket: ""
+    # Key prefix inside the bucket ("" = bucket root)
+    path: ""
+    region: auto
+    # rclone S3 provider name (Cloudflare, Backblaze, AWS, Minio, Other, ...)
+    provider: Other
+  upload:
+    image:
+      repository: rclone/rclone
+      tag: 1.76.0
+      pullPolicy: IfNotPresent
+    # Delete dumps older than this from the bucket ("" keeps everything)
+    retention: 7d
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        memory: 512Mi
+  # Give up if a run takes longer than this
+  activeDeadlineSeconds: 21600
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  # Resources of the container doing the copy and the dump
+  resources:
+    requests:
+      cpu: 500m
+      memory: 512Mi
+    limits:
+      memory: 2Gi
+
+# ---------------------------------------------------------------------------
+# Backing services
+# ---------------------------------------------------------------------------
+
+# Each bundled service is a subchart with an "enabled" switch. Disable it and
+# fill the matching external* block to use a service you run elsewhere. The
+# chart injects the endpoints (DATABASE_URL and PG*, REDIS_HOST,
+# OPENSEARCH_URL, MEDIAPROC_ADDR) into the app, worker, setup Jobs and cron
+# jobs for bundled and external services alike. Leave both off to provide
+# the variable through the env Secret instead.
+
+# PostgreSQL through the CloudNativePG "cluster" subchart. Requires the CNPG
+# operator; set enabled to false on clusters without it and use
+# externalDatabase. The Cluster is named "<release>-postgresql" and the app
+# connects to its -rw service. See the subchart's values for everything else
+# (backups, resources, monitoring, ...):
+# https://github.com/cloudnative-pg/charts/blob/main/charts/cluster/values.yaml
+postgresql:
+  enabled: true
+  cluster:
+    instances: 1
+    imageName: ghcr.io/cloudnative-pg/postgresql:18.6
+    storage:
+      size: 20Gi
+      storageClass: ""  # empty = cluster default
+    enableSuperuserAccess: false
+    monitoring:
+      enabled: false
+    initdb:
+      database: philomena
+      owner: philomena
+      # ICU collation (en-US), as in upstream's production setup; CNPG would
+      # otherwise initialize with the C locale, which sorts text differently.
+      # When restoring a dump from another server, match that server's
+      # locale settings (see also localeCollate and localeCType).
+      localeProvider: icu
+      icuLocale: en-US
+      # Run in the app database as superuser after it is created. The grants
+      # let the setup Job create a restore point (setupJob.restorePoint);
+      # change the role when changing the owner above.
+      postInitApplicationSQL:
+        - GRANT EXECUTE ON FUNCTION pg_catalog.pg_create_restore_point(text) TO philomena;
+        - GRANT EXECUTE ON FUNCTION pg_catalog.pg_switch_wal() TO philomena;
+      # By default CNPG generates the owner's credentials into the Secret
+      # "<release>-postgresql-app", which the chart reads to build
+      # DATABASE_URL. To use your own credentials instead, point this at a
+      # kubernetes.io/basic-auth Secret with "username" (= owner above) and
+      # "password" keys:
+      # secret:
+      #   name: philomena-db-credentials
+    postgresql:
+      parameters: {}
+        # CNPG defaults to max_connections 100; the app, worker, cron jobs
+        # and setup Job each open POOL_SIZE connections (16 unless the env
+        # Secret says otherwise, setupJob.poolSize for the setup Job).
+        # example:
+        # shared_buffers: "1GB"
+        # max_connections: "256"
+    affinity: {}
+
+# Database hosted elsewhere, used when postgresql.enabled is false
+externalDatabase:
+  host: ""
+  port: 5432
+  database: philomena
+  # Existing Secret with "username" and "password" keys (required when host
+  # is set). The password ends up in a URL: avoid characters that need
+  # URL-encoding.
+  existingSecret: ""
+
+# Valkey subchart (https://valkey.io/valkey-helm/). The app connects to
+# <release>-valkey on the default port 6379, without authentication. See the
+# subchart's values for all options.
+valkey:
+  enabled: true
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      memory: 1Gi
+  nodeSelector: {}
+  # Valkey holds the job queue and caches. Without a volume, jobs that are
+  # queued while it restarts are lost.
+  dataStorage:
+    enabled: false
+    # requestedSize: 5Gi
+    # className: ""  # empty = cluster default
+
+externalValkey:
+  # When set, injected as REDIS_HOST. The app always connects on the default
+  # port 6379, without authentication.
+  host: ""
+
+# OpenSearch subchart (https://opensearch-project.github.io/helm-charts/).
+# Philomena talks plain HTTP without authentication, so the default is a
+# single node with the security plugin disabled, as in upstream's Docker
+# setup. Keep it on a private network (see networkPolicy below). The nodes
+# need vm.max_map_count >= 262144 (README, "OpenSearch").
+opensearch:
+  enabled: true
+  singleNode: true
+  # Service the app connects to (OPENSEARCH_URL=http://<masterService>:9200).
+  # Must be "<clusterName>-<nodeGroup>"; the defaults are the subchart's.
+  masterService: opensearch-cluster-master
+  protocol: http
+  # JVM heap; keep Xms and Xmx equal and at about half the container memory,
+  # the rest is page cache. The index of a site with a few million images
+  # wants a heap of 16g or more.
+  opensearchJavaOpts: "-Xms1g -Xmx1g"
+  resources:
+    requests:
+      cpu: 250m
+      memory: 2Gi
+    limits:
+      memory: 2Gi
+  extraEnvs:
+    - name: DISABLE_SECURITY_PLUGIN
+      value: "true"
+    - name: DISABLE_INSTALL_DEMO_CONFIG
+      value: "true"
+  nodeAffinity: {}
+  persistence:
+    storageClass: ""  # empty = cluster default
+    size: 20Gi
+
+externalOpensearch:
+  # When set, injected as OPENSEARCH_URL, e.g. http://opensearch.example.com:9200.
+  # If the URL embeds credentials, put OPENSEARCH_URL in the env Secret
+  # instead and leave this empty.
+  url: ""
+
+externalMediaproc:
+  # When set (and mediaproc.enabled is false), injected as MEDIAPROC_ADDR
+  # (host:port, e.g. mediaproc.example.com:1500).
+  addr: ""
+
+# NetworkPolicies that only let the pods of this release reach the bundled
+# OpenSearch, Valkey and mediaproc, none of which authenticate their
+# clients. Needs a CNI that enforces NetworkPolicies (plain flannel does
+# not; k3s, Calico and Cilium do).
+networkPolicy:
+  enabled: false
+  # Extra NetworkPolicyPeers allowed in, e.g. a monitoring namespace
+  extraFrom: []
+  # - namespaceSelector:
+  #     matchLabels:
+  #       kubernetes.io/metadata.name: monitoring

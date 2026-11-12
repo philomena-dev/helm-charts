@@ -1,0 +1,10 @@
+# Subchart packages; restore them with `helm dependency build charts/<chart>`
+charts/*/charts/
+
+# Output of the release workflow and of a local site build
+.release/
+_site/
+releases.json
+node_modules/
+
+.DS_Store

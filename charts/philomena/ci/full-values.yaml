@@ -1,0 +1,82 @@
+# Values used by chart-testing (ct lint) and kubeconform in CI only. Bundled
+# services with every optional feature of the chart turned on.
+image:
+  tag: 1.3.0-ci
+  pullSecrets:
+    - registry
+mediaproc:
+  image:
+    tag: 1.3.0-ci-mediaproc
+existingSecret: philomena-env
+env:
+  APP_ORIGIN: https://philomena.example
+  POOL_SIZE: 20
+siteConfig:
+  footer.json: |
+    {"cols": []}
+purgeCache:
+  script: |
+    #!/bin/sh
+    exit 0
+extraVolumes:
+  - name: tmp
+    emptyDir: {}
+extraVolumeMounts:
+  - name: tmp
+    mountPath: /tmp
+web:
+  cdn:
+    enabled: true
+    hosts:
+      - cdn.philomena.example
+      - cdn2.philomena.example
+ingress:
+  enabled: true
+  className: traefik
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt
+  hosts:
+    - host: philomena.example
+      paths:
+        - path: /
+          pathType: Prefix
+    - host: cdn.philomena.example
+  tls:
+    - secretName: philomena-tls
+      hosts:
+        - philomena.example
+        - cdn.philomena.example
+httpRoute:
+  enabled: true
+  parentRefs:
+    - name: gateway
+      namespace: gateway-system
+  hostnames:
+    - philomena.example
+networkPolicy:
+  enabled: true
+  extraFrom:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: monitoring
+replicaCount: 0
+worker:
+  replicaCount: 0
+cron:
+  jobs:
+    - name: cron
+      schedule: "*/5 * * * *"
+      command: /usr/local/bin/run-cron
+      suspend: true
+      timeZone: Europe/Berlin
+      resources:
+        requests:
+          cpu: 50m
+          memory: 128Mi
+publicDump:
+  enabled: true
+  suspend: true
+  s3:
+    existingSecret: public-dump-s3
+    endpoint: https://s3.example.com
+    bucket: dumps

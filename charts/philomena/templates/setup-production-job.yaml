@@ -1,0 +1,75 @@
+{{- if .Values.setupJob.enabled -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "philomena.fullname" . }}-setup-production
+  labels:
+    {{- include "philomena.labels" . | nindent 4 }}
+    app.kubernetes.io/component: setup
+  annotations:
+    kubernetes.io/description: "Initializes or migrates the Philomena database and search indexes (setup-production)."
+    # After install (the database cluster has to exist first) and before the
+    # workloads of an upgrade are rolled out. The Job is kept until the next
+    # run so its log (including the restore point name) stays available.
+    "helm.sh/hook": "post-install,pre-upgrade"
+    "helm.sh/hook-weight": "0"
+    "helm.sh/hook-delete-policy": "before-hook-creation"
+    # Argo CD: in every sync, after the database, OpenSearch and the
+    # preflight Job, before the workloads (see preflight-job.yaml).
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/sync-wave: "2"
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  # A failed migration needs a look, not an automatic retry
+  backoffLimit: 0
+  {{- with .Values.setupJob.activeDeadlineSeconds }}
+  activeDeadlineSeconds: {{ . }}
+  {{- end }}
+  template:
+    metadata:
+      labels:
+        {{- include "philomena.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: setup
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      restartPolicy: Never
+      {{- include "philomena.appPodSpec" . | nindent 6 }}
+      containers:
+        - name: setup-production
+          image: {{ include "philomena.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          workingDir: /srv/philomena
+          env:
+            {{- include "philomena.setupEnv" . | nindent 12 }}
+          {{- with include "philomena.envSecretName" . }}
+          envFrom:
+            - secretRef:
+                name: {{ . }}
+          {{- end }}
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - |
+              {{- include "philomena.setupScript" . | nindent 14 }}
+          {{- with .Values.extraVolumeMounts }}
+          volumeMounts:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.setupJob.resources | nindent 12 }}
+      {{- with .Values.extraVolumes }}
+      volumes:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

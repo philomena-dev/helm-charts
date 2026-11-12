@@ -1,0 +1,36 @@
+# Philomena against services that run elsewhere: no CloudNativePG operator
+# and no subchart is needed. Pick any subset; each bundled service has its
+# own switch.
+
+existingSecret: philomena-env
+
+postgresql:
+  enabled: false
+externalDatabase:
+  host: postgres.example.com
+  port: 5432
+  database: philomena
+  # kubectl create secret generic philomena-db \
+  #   --from-literal=username=philomena --from-literal=password=...
+  existingSecret: philomena-db
+
+valkey:
+  enabled: false
+externalValkey:
+  host: valkey.example.com  # port 6379, no authentication
+
+opensearch:
+  enabled: false
+externalOpensearch:
+  url: http://opensearch.example.com:9200
+
+# mediaproc can stay in the cluster; to run it elsewhere as well:
+# mediaproc:
+#   enabled: false
+# externalMediaproc:
+#   addr: mediaproc.example.com:1500
+
+ingress:
+  enabled: true
+  hosts:
+    - host: philomena.example

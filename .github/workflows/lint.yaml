@@ -1,0 +1,45 @@
+name: Lint Charts
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v5.1.0
+
+      - uses: actions/setup-python@v7.1.0
+        with:
+          python-version: '3.x'
+
+      - name: Set up chart-testing
+        uses: helm/chart-testing-action@v2.9.0
+
+      # Lints the charts changed against the default branch, with their
+      # default values and each ci/*-values.yaml. Also requires a version
+      # bump in Chart.yaml for every change to a chart.
+      - name: Run chart-testing (lint)
+        run: ct lint --config ct.yaml
+
+      - name: Set up kubeconform
+        env:
+          KUBECONFORM_VERSION: v0.8.0
+        run: |
+          curl -sSfL "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" \
+            | sudo tar xz -C /usr/local/bin kubeconform
+          python3 -m pip install --quiet pyyaml
+
+      - name: Validate rendered manifests (kubeconform)
+        run: scripts/validate.sh

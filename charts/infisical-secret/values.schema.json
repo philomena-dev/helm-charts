@@ -1,0 +1,89 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "enabled": {
+      "type": "boolean",
+      "description": "Dependency condition when used as a subchart (ignored by this chart)"
+    },
+    "global": {
+      "type": "object"
+    },
+    "hostAPI": {
+      "type": "string",
+      "minLength": 1
+    },
+    "projectSlug": {
+      "type": "string"
+    },
+    "envSlug": {
+      "type": "string"
+    },
+    "credentialsRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "secretName": {
+          "type": "string",
+          "minLength": 1
+        },
+        "secretNamespace": {
+          "type": "string"
+        }
+      }
+    },
+    "secrets": {
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+      },
+      "additionalProperties": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "secretsPath": {
+            "type": "string"
+          },
+          "recursive": {
+            "type": "boolean"
+          },
+          "projectSlug": {
+            "type": "string"
+          },
+          "envSlug": {
+            "type": "string"
+          },
+          "secretName": {
+            "type": "string"
+          },
+          "secretNamespace": {
+            "type": "string"
+          },
+          "secretType": {
+            "type": "string"
+          },
+          "creationPolicy": {
+            "enum": [
+              "Owner",
+              "Orphan"
+            ]
+          }
+        }
+      }
+    },
+    "resyncInterval": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1
+    }
+  }
+}
