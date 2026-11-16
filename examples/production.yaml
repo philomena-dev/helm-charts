@@ -140,6 +140,8 @@ postgresql:
 publicDump:
   enabled: false
   namePrefix: philomena_public_dump
+  page:
+    siteName: Philomena  # the name of the site on the download page
   scratch:
     size: 30Gi  # about three times the public tables
   s3:

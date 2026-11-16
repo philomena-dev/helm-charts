@@ -421,22 +421,40 @@ publishes an anonymized dump of the database. Each run:
    images, anonymous authorship, non-public forums, deleted and hidden posts
    and every user column but id and name are left out), drops the originals
    and keeps only the result. The URLs it writes come from `IMAGE_URL_ROOT`
-   and `BADGE_URL_ROOT` of the app's environment. Replace the SQL with
-   `publicDump.existingConfigMap` (key `public-dump.sql`);
-4. writes `<namePrefix>_<YYYY_MM_DD>.pgdump` and a `latest.json` (file,
-   size, sha256, created_at) and uploads both with rclone to
-   `publicDump.s3.*`, then deletes dumps older than
-   `publicDump.upload.retention` from the bucket.
+   and `BADGE_URL_ROOT` of the app's environment (the Secret or `env`).
+   Replace the SQL with `publicDump.existingConfigMap` (key
+   `public-dump.sql`);
+4. writes `<namePrefix>_<YYYY_MM_DD>.pgdump`, a `latest.json` (file, size,
+   sha256, created_at) and an `index.html`, and uploads them with rclone to
+   `publicDump.s3.*`, the dump first. Dumps older than
+   `publicDump.upload.retention` are then deleted from the bucket.
+
+`index.html` is the download page: the link to the dump with its size and
+checksum, how to load a dump, and the layout of the published tables, read
+from the dump that was just built. It is a single file, styled with
+[PhilomenaCSS](https://github.com/Meow/PhilomenaCSS), and links the dump by
+its file name, so it works from wherever the bucket is served.
+`publicDump.page.siteName` is the name of the site on it and
+`publicDump.page.siteUrl` the address it links to (`APP_ORIGIN` of the app's
+environment when empty); `publicDump.page.enabled: false` leaves the page
+out.
 
 The S3 credentials come from a Secret with `AWS_ACCESS_KEY_ID` and
 `AWS_SECRET_ACCESS_KEY` keys (`publicDump.s3.existingSecret`); use a key
-scoped to that bucket, not the app's. Serving the files, and any download
-page built from `latest.json`, is left to whatever fronts the bucket. Size
-the scratch volume at about three times the public tables and keep it off
-the database's disk if you can, keep the PostgreSQL image's major version
-equal to the database's, and expect the run to compete with the site for I/O
-on a single-instance cluster. Sidecar containers need Kubernetes 1.29 or
-newer.
+scoped to that bucket, not the app's. Serving the files is left to whatever
+fronts the bucket. A dump never changes once it is uploaded and can be
+cached for good; `latest.json` and `index.html` are replaced by every run,
+so cache them briefly, and serve `index.html` for the root of the domain.
+Size the scratch volume at about three times the public tables and keep it
+off the database's disk if you can, keep the PostgreSQL image's major
+version equal to the database's, and expect the run to compete with the site
+for I/O on a single-instance cluster. Sidecar containers need Kubernetes
+1.29 or newer.
+
+The scripts, the SQL and the page template in `files/` are copies of the
+ones in the philomena-public-dump repository, which the Docker Compose
+deployment runs as well; `scripts/sync-public-dump.sh` in the chart
+repository updates them.
 
 ## Security
 

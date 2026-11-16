@@ -400,7 +400,8 @@ on the database volume, which holds the WAL until it is shipped.
 ### Public database dump
 
 The chart can publish a nightly anonymized dump of the database to a bucket,
-like the ones Derpibooru and Furbooru offer. It is off by default; see
+together with a page to download it from, like the ones Derpibooru and
+Furbooru offer. It is off by default; see
 [Public dump](charts/philomena/README.md#public-dump).
 
 ## Moving an existing site
@@ -636,6 +637,12 @@ scripts/validate.sh                      # kubeconform, CRDs included
 chart. Each chart has `ci/*-values.yaml` files that exercise its optional
 paths; add to them when you add a value, and keep `values.schema.json` and
 the README's values table in step.
+
+The public dump's scripts, SQL and page template
+(`charts/philomena/files/public-dump*`, `index.html.tmpl`) are maintained in
+the philomena-public-dump repository, where they are tested against a real
+database. Change them there and copy them over with
+`scripts/sync-public-dump.sh`.
 
 Pushing to `main` releases every chart version that has no
 `<chart>-<version>` GitHub release yet and republishes

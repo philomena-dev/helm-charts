@@ -1,4 +1,5 @@
-{{- if and .Values.publicDump.enabled (not .Values.publicDump.existingConfigMap) -}}
+{{- if .Values.publicDump.enabled -}}
+{{- $pd := .Values.publicDump -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -7,6 +8,16 @@ metadata:
     {{- include "philomena.labels" . | nindent 4 }}
     app.kubernetes.io/component: public-dump
 data:
+  public-dump.sh: |
+    {{- .Files.Get "files/public-dump.sh" | nindent 4 }}
+  public-dump-upload.sh: |
+    {{- .Files.Get "files/public-dump-upload.sh" | nindent 4 }}
+  {{- if not $pd.existingConfigMap }}
   public-dump.sql: |
     {{- .Files.Get "files/public-dump.sql" | nindent 4 }}
+  {{- end }}
+  {{- if $pd.page.enabled }}
+  index.html.tmpl: |
+    {{- .Files.Get "files/index.html.tmpl" | nindent 4 }}
+  {{- end }}
 {{- end }}

@@ -1,20 +1,20 @@
 -- Anonymized public dump of a Philomena database.
 --
--- Runs in the throwaway PostgreSQL of the publicDump CronJob, which holds a
--- copy of the public schema's structure and the data of the tables listed in
--- publicDump.tables. Builds the published tables in the public_dump schema
--- from that copy, then drops the original schema and renames public_dump to
--- public, so the final pg_dump contains only the published tables.
+-- Runs in the scratch PostgreSQL of public-dump.sh, which holds a copy of
+-- the public schema's structure and the data of the tables in TABLES. Builds
+-- the published tables in the public_dump schema from that copy, then drops
+-- the original schema and renames public_dump to public, so the final
+-- pg_dump contains only the published tables.
 --
 -- What is left out: hidden images and their comments, anonymous authorship
 -- (user_id becomes null), forums that are not "normal" and their topics and
 -- posts, deleted topics, hidden posts and comments, unverified or private
 -- artist links, and every user column except id and name.
 --
--- psql variables, set by the CronJob from the environment:
+-- psql variables, set by public-dump.sh from its environment:
 --   image_url_root  IMAGE_URL_ROOT, prefix of the images' version_path
 --   badge_url_root  BADGE_URL_ROOT, prefix of badge image URLs
---   work_mem        work_mem for this transaction (publicDump.workMem)
+--   work_mem        WORK_MEM, work_mem for this transaction
 
 begin;
 set local work_mem = :'work_mem';

@@ -479,11 +479,12 @@ cron:
 # the tables below into a throwaway PostgreSQL running as a sidecar of the
 # Job pod, builds the published tables there with files/public-dump.sql
 # (hidden images, anonymous authorship, private forums and all personal data
-# removed), writes a pg_dump archive "<namePrefix>_<YYYY_MM_DD>.pgdump" plus
-# a latest.json (file, size, sha256, created_at) and uploads both to an S3
-# bucket with rclone. Serving the files is left to whatever fronts the CDN.
-# Needs Kubernetes 1.29+ (sidecar containers) and a pod security context
-# that lets the postgres image start as root (the default).
+# removed), writes a pg_dump archive "<namePrefix>_<YYYY_MM_DD>.pgdump", a
+# latest.json (file, size, sha256, created_at) and an index.html to download
+# the dump from, and uploads the three to an S3 bucket with rclone. Serving
+# the files is left to whatever fronts the bucket. Needs Kubernetes 1.29+
+# (sidecar containers) and a pod security context that lets the postgres
+# image start as root (the default).
 publicDump:
   enabled: false
   schedule: "0 4 * * *"
@@ -527,6 +528,17 @@ publicDump:
   # Use your own SQL instead of files/public-dump.sql: name of a ConfigMap
   # with a "public-dump.sql" key. It receives the same psql variables.
   existingConfigMap: ""
+  # index.html, uploaded next to the dump: the download link with the size
+  # and the checksum, how to load a dump, and the layout of the published
+  # tables. A single file that links the dump by its name, so it works from
+  # wherever the bucket is served.
+  page:
+    enabled: true
+    # Name of the site on the page
+    siteName: Philomena
+    # Address of the site, linked from the page (empty = APP_ORIGIN of the
+    # app's environment)
+    siteUrl: ""
   # PostgreSQL image for the sidecar and the client tools; its major version
   # must match the database's
   image:

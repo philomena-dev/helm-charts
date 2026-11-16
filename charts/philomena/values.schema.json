@@ -752,6 +752,23 @@
         "existingConfigMap": {
           "type": "string"
         },
+        "page": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "siteName": {
+              "type": "string",
+              "minLength": 1
+            },
+            "siteUrl": {
+              "type": "string",
+              "pattern": "^(https?://.+)?$"
+            }
+          }
+        },
         "image": {
           "$ref": "#/definitions/thirdPartyImage"
         },

@@ -12,7 +12,7 @@ metadata:
     {{- include "philomena.labels" . | nindent 4 }}
     app.kubernetes.io/component: public-dump
   annotations:
-    kubernetes.io/description: "Builds the anonymized public database dump and uploads it to S3."
+    kubernetes.io/description: "Builds the anonymized public database dump and its download page, and uploads them to S3."
     argocd.argoproj.io/sync-wave: "3"
 spec:
   schedule: {{ $pd.schedule | quote }}
@@ -107,20 +107,28 @@ spec:
                   mountPath: /dev/shm
               resources:
                 {{- toYaml $pd.scratch.resources | nindent 16 }}
-            # Copies the data, builds the public tables, writes the dump
+            # Copies the data, builds the public tables, writes the dump,
+            # latest.json and the page
             - name: dump
               image: "{{ $pd.image.repository }}:{{ $pd.image.tag }}"
               imagePullPolicy: {{ $pd.image.pullPolicy }}
               command:
                 - /bin/sh
-                - -c
-              args:
-                - |
-                  {{- include "philomena.publicDumpScript" . | nindent 18 }}
+                - /opt/public-dump/public-dump.sh
               env:
                 {{- include "philomena.servicesEnv" . | nindent 16 }}
+                {{- /* The URLs the dump and the page carry, when they are
+                       set in the values instead of the Secret */}}
+                {{- range $name := list "IMAGE_URL_ROOT" "BADGE_URL_ROOT" "APP_ORIGIN" }}
+                {{- with index $.Values.env $name }}
+                - name: {{ $name }}
+                  value: {{ . | toString | quote }}
+                {{- end }}
+                {{- end }}
                 - name: SOURCE_HOST
                   value: {{ include "philomena.publicDump.sourceHost" . | quote }}
+                - name: SCRATCH_HOST
+                  value: "127.0.0.1"
                 - name: SCRATCH_USER
                   value: philomena
                 - name: SCRATCH_DB
@@ -133,8 +141,23 @@ spec:
                   value: {{ $pd.parallelJobs | int | quote }}
                 - name: WORK_MEM
                   value: {{ $pd.workMem | quote }}
+                - name: WORK_DIR
+                  value: /scratch
+                - name: SQL_FILE
+                  value: {{ ternary "/config/public-dump.sql" "/opt/public-dump/public-dump.sql" (not (empty $pd.existingConfigMap)) }}
+                - name: PAGE_TEMPLATE
+                  value: {{ ternary "/opt/public-dump/index.html.tmpl" "" $pd.page.enabled | quote }}
+                {{- if $pd.page.enabled }}
+                - name: SITE_NAME
+                  value: {{ $pd.page.siteName | quote }}
+                {{- with $pd.page.siteUrl }}
+                - name: SITE_URL
+                  value: {{ . | quote }}
+                {{- end }}
+                {{- end }}
               {{- with include "philomena.envSecretName" . }}
-              # IMAGE_URL_ROOT and BADGE_URL_ROOT for the published URLs
+              # IMAGE_URL_ROOT and BADGE_URL_ROOT for the published URLs,
+              # APP_ORIGIN for the page's link to the site
               envFrom:
                 - secretRef:
                     name: {{ . }}
@@ -142,9 +165,14 @@ spec:
               volumeMounts:
                 - name: scratch
                   mountPath: /scratch
+                - name: files
+                  mountPath: /opt/public-dump
+                  readOnly: true
+                {{- if $pd.existingConfigMap }}
                 - name: sql
                   mountPath: /config
                   readOnly: true
+                {{- end }}
               resources:
                 {{- toYaml $pd.resources | nindent 16 }}
           containers:
@@ -153,15 +181,15 @@ spec:
               imagePullPolicy: {{ $pd.upload.image.pullPolicy }}
               command:
                 - /bin/sh
-                - -c
-              args:
-                - |
-                  {{- include "philomena.publicDumpUploadScript" . | nindent 18 }}
+                - /opt/public-dump/public-dump-upload.sh
+                - /scratch/out
               env:
                 - name: S3_BUCKET
                   value: {{ $s3.bucket | quote }}
                 - name: S3_PATH
                   value: {{ $s3.path | quote }}
+                - name: RETENTION
+                  value: {{ $pd.upload.retention | quote }}
                 - name: RCLONE_CONFIG_DEST_TYPE
                   value: s3
                 - name: RCLONE_CONFIG_DEST_PROVIDER
@@ -187,6 +215,9 @@ spec:
                 - name: scratch
                   mountPath: /scratch
                   readOnly: true
+                - name: files
+                  mountPath: /opt/public-dump
+                  readOnly: true
               resources:
                 {{- toYaml $pd.upload.resources | nindent 16 }}
           volumes:
@@ -206,7 +237,12 @@ spec:
               emptyDir:
                 medium: Memory
                 sizeLimit: {{ $pd.scratch.shmSize }}
+            - name: files
+              configMap:
+                name: {{ include "philomena.fullname" . }}-public-dump
+            {{- with $pd.existingConfigMap }}
             - name: sql
               configMap:
-                name: {{ $pd.existingConfigMap | default (printf "%s-public-dump" (include "philomena.fullname" .)) }}
+                name: {{ . }}
+            {{- end }}
 {{- end }}

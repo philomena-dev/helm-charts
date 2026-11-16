@@ -45,6 +45,10 @@ cron:
   suspend: true
 publicDump:
   enabled: true
+  # Own SQL, no page
+  existingConfigMap: public-dump-sql
+  page:
+    enabled: false
   s3:
     existingSecret: public-dump-s3
     endpoint: https://s3.example.com

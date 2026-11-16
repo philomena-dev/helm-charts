@@ -76,6 +76,9 @@ cron:
 publicDump:
   enabled: true
   suspend: true
+  page:
+    siteName: Philomena "Example" & Friends
+    siteUrl: https://philomena.example
   s3:
     existingSecret: public-dump-s3
     endpoint: https://s3.example.com
