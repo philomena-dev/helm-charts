@@ -1,7 +1,14 @@
 {{- if .Values.networkPolicy.enabled }}
-{{- /* Every pod of this release, the app's as well as the subcharts'. */}}
-{{- $from := prepend .Values.networkPolicy.extraFrom (dict "podSelector" (dict "matchLabels" (dict "app.kubernetes.io/instance" .Release.Name))) }}
+{{- /*
+One policy per bundled service, for both directions. In: the pods running
+the app image on the service's port, the service's own pods and
+networkPolicy.extraFrom. Out: the service's own pods and the cluster DNS,
+which leaves no way out of the cluster.
+*/}}
+{{- $np := .Values.networkPolicy }}
 {{- if .Values.opensearch.enabled }}
+{{- $self := include "philomena.subchartSelector" (dict "ctx" . "name" "opensearch") | fromYaml }}
+---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -9,18 +16,36 @@ metadata:
   labels:
     {{- include "philomena.labels" . | nindent 4 }}
   annotations:
-    kubernetes.io/description: "OpenSearch runs without authentication: only this release may reach it."
+    kubernetes.io/description: "OpenSearch runs without authentication: only the app pods may reach it, and it reaches nothing but its own nodes."
 spec:
   podSelector:
     matchLabels:
-      {{- include "philomena.subchartSelector" (dict "ctx" . "name" "opensearch") | nindent 6 }}
+      {{- toYaml $self | nindent 6 }}
   policyTypes:
     - Ingress
+    - Egress
   ingress:
     - from:
-        {{- toYaml $from | nindent 8 }}
+        {{- include "philomena.networkPolicy.clients" (dict "ctx" .) | nindent 8 }}
+      ports:
+        - port: {{ .Values.opensearch.httpPort | int }}
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- toYaml $self | nindent 14 }}
+    {{- with $np.extraFrom }}
+    - from:
+        {{- toYaml . | nindent 8 }}
+    {{- end }}
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- toYaml $self | nindent 14 }}
+    {{- include "philomena.networkPolicy.dns" . | nindent 4 }}
 {{- end }}
 {{- if .Values.valkey.enabled }}
+{{- $self := include "philomena.subchartSelector" (dict "ctx" . "name" "valkey") | fromYaml }}
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -29,16 +54,33 @@ metadata:
   labels:
     {{- include "philomena.labels" . | nindent 4 }}
   annotations:
-    kubernetes.io/description: "Valkey runs without authentication: only this release may reach it."
+    kubernetes.io/description: "Valkey runs without authentication: only the app pods may reach it, and it reaches nothing but its own replicas."
 spec:
   podSelector:
     matchLabels:
-      {{- include "philomena.subchartSelector" (dict "ctx" . "name" "valkey") | nindent 6 }}
+      {{- toYaml $self | nindent 6 }}
   policyTypes:
     - Ingress
+    - Egress
   ingress:
     - from:
-        {{- toYaml $from | nindent 8 }}
+        {{- include "philomena.networkPolicy.clients" (dict "ctx" .) | nindent 8 }}
+      ports:
+        - port: {{ .Values.valkey.service.port | int }}
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- toYaml $self | nindent 14 }}
+    {{- with $np.extraFrom }}
+    - from:
+        {{- toYaml . | nindent 8 }}
+    {{- end }}
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- toYaml $self | nindent 14 }}
+    {{- include "philomena.networkPolicy.dns" . | nindent 4 }}
 {{- end }}
 {{- if .Values.mediaproc.enabled }}
 ---
@@ -50,16 +92,94 @@ metadata:
     {{- include "philomena.labels" . | nindent 4 }}
     app.kubernetes.io/component: mediaproc
   annotations:
-    kubernetes.io/description: "mediaproc runs without authentication: only this release may reach it."
+    kubernetes.io/description: "mediaproc runs without authentication: only the app pods may reach it, and it reaches nothing."
 spec:
   podSelector:
     matchLabels:
       {{- include "philomena.selectorLabels" . | nindent 6 }}
       app.kubernetes.io/component: mediaproc
+  # No egress rules: mediaproc only answers the app
   policyTypes:
     - Ingress
+    - Egress
   ingress:
     - from:
-        {{- toYaml $from | nindent 8 }}
+        {{- include "philomena.networkPolicy.clients" (dict "ctx" .) | nindent 8 }}
+      ports:
+        - port: 1500
+    {{- with $np.extraFrom }}
+    - from:
+        {{- toYaml . | nindent 8 }}
+    {{- end }}
+{{- end }}
+{{- if and .Values.postgresql.enabled $np.postgresql.enabled }}
+{{- $pg := $np.postgresql }}
+{{- if not $pg.apiServer.cidrs }}
+{{- fail "networkPolicy.postgresql.apiServer.cidrs is required: the CloudNativePG instances have to reach the Kubernetes API server (addresses: kubectl get endpointslices -n default kubernetes). Set networkPolicy.postgresql.enabled to false to leave the database without a policy." }}
+{{- end }}
+{{- if and .Values.postgresql.backups.enabled (not $pg.extraEgress) }}
+{{- fail "postgresql.backups is enabled: networkPolicy.postgresql.extraEgress has to allow the object store, or WAL archiving and backups fail" }}
+{{- end }}
+{{- /* Instances, the Jobs that create them and poolers */}}
+{{- $self := dict "cnpg.io/cluster" (include "philomena.postgresql.fullname" .) }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "philomena.fullname" . }}-postgresql
+  labels:
+    {{- include "philomena.labels" . | nindent 4 }}
+  annotations:
+    kubernetes.io/description: "Only the app pods and the CloudNativePG operator may reach PostgreSQL, and it reaches nothing but its own instances and the Kubernetes API."
+spec:
+  podSelector:
+    matchLabels:
+      {{- toYaml $self | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        {{- include "philomena.networkPolicy.clients" (dict "ctx" . "also" (list "public-dump")) | nindent 8 }}
+      ports:
+        - port: 5432
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- toYaml $self | nindent 14 }}
+    # The operator polls the instance manager (8000)
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $pg.operatorNamespace }}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: cloudnative-pg
+      ports:
+        - port: 8000
+        - port: 5432
+    {{- with $np.extraFrom }}
+    - from:
+        {{- toYaml . | nindent 8 }}
+    {{- end }}
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- toYaml $self | nindent 14 }}
+    {{- include "philomena.networkPolicy.dns" . | nindent 4 }}
+    # The instance manager works against the Kubernetes API
+    - to:
+        {{- range $pg.apiServer.cidrs }}
+        - ipBlock:
+            cidr: {{ . }}
+        {{- end }}
+      ports:
+        {{- range $pg.apiServer.ports }}
+        - port: {{ . | int }}
+        {{- end }}
+    {{- with $pg.extraEgress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
 {{- end }}
 {{- end }}

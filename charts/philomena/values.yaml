@@ -745,14 +745,47 @@ externalMediaproc:
   # (host:port, e.g. mediaproc.example.com:1500).
   addr: ""
 
-# NetworkPolicies that only let the pods of this release reach the bundled
-# OpenSearch, Valkey and mediaproc, none of which authenticate their
-# clients. Needs a CNI that enforces NetworkPolicies (plain flannel does
-# not; k3s, Calico and Cilium do).
+# NetworkPolicies that isolate the bundled PostgreSQL, OpenSearch, Valkey and
+# mediaproc. Only the pods running the app image (app, worker, setup Jobs,
+# cron jobs; the public dump for PostgreSQL) reach them, and they reach
+# nothing but their own replicas and the cluster DNS (kube-dns in
+# kube-system): no other pod, nothing outside the cluster. Needs a CNI that
+# enforces NetworkPolicies (plain flannel does not; k3s, Calico and Cilium
+# do).
 networkPolicy:
   enabled: false
-  # Extra NetworkPolicyPeers allowed in, e.g. a monitoring namespace
+  # Extra NetworkPolicyPeers allowed into all of them, e.g. a monitoring
+  # namespace
   extraFrom: []
   # - namespaceSelector:
   #     matchLabels:
   #       kubernetes.io/metadata.name: monitoring
+  postgresql:
+    # Disable to leave the database without a policy, e.g. where the CNI
+    # cannot match the API server by address (Cilium with the control plane
+    # on cluster nodes, unless policy-cidr-match-mode includes "nodes").
+    enabled: true
+    # The Kubernetes API server, which the CloudNativePG instances cannot
+    # run without. Required with the bundled PostgreSQL.
+    apiServer:
+      # Its addresses, as listed by
+      # `kubectl get endpointslices -n default kubernetes`. Where they
+      # change (managed control planes), give the range they come from.
+      cidrs: []
+      # - 203.0.113.10/32
+      ports:
+        - 443
+        - 6443
+    # Namespace of the CloudNativePG operator, which has to reach the
+    # instances
+    operatorNamespace: cnpg-system
+    # Extra NetworkPolicyEgressRules. Required with postgresql.backups, and
+    # needed to recover from one: the instances upload to and download from
+    # the object store themselves.
+    extraEgress: []
+    # - to:
+    #     - ipBlock:
+    #         cidr: 0.0.0.0/0
+    #         except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16]
+    #   ports:
+    #     - port: 443

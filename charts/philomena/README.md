@@ -231,8 +231,9 @@ so avoid characters that need URL-encoding. `setup-production` creates the
 
 Philomena talks to OpenSearch over plain HTTP without authentication, so the
 bundled node runs alone with the security plugin disabled, as in upstream's
-Docker setup. Nothing but the pods of this release should be able to reach
-it; `networkPolicy.enabled` enforces that where the CNI supports it.
+Docker setup. Nothing but the app pods should be able to reach it;
+`networkPolicy.enabled` enforces that where the CNI supports it
+([Network policies](#network-policies)).
 `opensearch.masterService` names the Service the app connects to and must
 stay `<clusterName>-<nodeGroup>` of the subchart; it is not prefixed with the
 release name, so two releases in one namespace need different
@@ -468,9 +469,55 @@ repository updates them.
   root. A namespace that holds them can enforce `baseline`, not `restricted`.
 - No workload talks to the Kubernetes API; no service account token is
   mounted.
-- `networkPolicy.enabled` adds policies that only let pods of this release
-  reach the bundled OpenSearch, Valkey and mediaproc, none of which
-  authenticate their clients. It needs a CNI that enforces NetworkPolicies.
+- `networkPolicy.enabled` isolates the bundled services; see below.
+
+### Network policies
+
+`networkPolicy.enabled: true` adds one NetworkPolicy for each of the bundled
+PostgreSQL, OpenSearch, Valkey and mediaproc. It needs a CNI that enforces
+NetworkPolicies. With them:
+
+- only the pods running the app image (app, worker, setup Jobs, cron jobs)
+  reach the services, each on its own port; the public dump reaches
+  PostgreSQL. OpenSearch, Valkey and mediaproc do not authenticate their
+  clients, so this is what keeps other pods of the cluster out.
+  `networkPolicy.extraFrom` lets more peers in, e.g. a monitoring namespace;
+- the services reach nothing but their own replicas and the cluster DNS
+  (`k8s-app: kube-dns` pods in `kube-system`), mediaproc nothing at all.
+  Neither another pod nor an address outside the cluster is reachable from
+  them.
+
+PostgreSQL needs two exceptions, which is what `networkPolicy.postgresql` is
+for:
+
+```yaml
+networkPolicy:
+  enabled: true
+  postgresql:
+    apiServer:
+      cidrs:
+        - 203.0.113.10/32
+```
+
+- **Kubernetes API.** The CloudNativePG instances do not run without it, so
+  `apiServer.cidrs` is required: the addresses listed by
+  `kubectl get endpointslices -n default kubernetes` (the nodes of the
+  control plane on most clusters), and `apiServer.ports` when the API
+  listens on neither 6443 nor 443. A policy that misses the API server
+  leaves the instance pods unable to start. Cilium does not match cluster
+  nodes by address unless `policy-cidr-match-mode` includes `nodes`; where
+  that is not an option, set `networkPolicy.postgresql.enabled: false` and
+  write a CiliumNetworkPolicy for the database instead.
+- **Backups.** The instances upload WAL and backups to the object store
+  themselves, and download from it on recovery. With `postgresql.backups`
+  enabled the chart refuses to render until
+  `networkPolicy.postgresql.extraEgress` has a rule, e.g. port 443 of the
+  provider's address range. That is the one way out of the cluster the
+  database then has.
+
+The operator is let in from `networkPolicy.postgresql.operatorNamespace`
+(`cnpg-system`). The policies do not restrict the app pods themselves, which
+talk to S3, SMTP and other sites.
 
 ## Values
 
@@ -529,4 +576,6 @@ in full, and `values.schema.json` rejects misspelled keys.
 | `opensearch.*` | OpenSearch subchart | enabled, single node, 1g heap, 20Gi |
 | `externalOpensearch.url` | External OpenSearch | `""` |
 | `externalMediaproc.addr` | External mediaproc (`host:port`) | `""` |
-| `networkPolicy.*` | NetworkPolicies for the bundled services: `enabled`, `extraFrom` | disabled |
+| `networkPolicy.enabled` | NetworkPolicies isolating the bundled services | `false` |
+| `networkPolicy.extraFrom` | Extra peers allowed into the bundled services | `[]` |
+| `networkPolicy.postgresql.*` | PostgreSQL policy: `enabled`, `apiServer.cidrs` (required), `apiServer.ports`, `operatorNamespace`, `extraEgress` | enabled, ports 443 and 6443, `cnpg-system` |

@@ -699,6 +699,41 @@ app.kubernetes.io/instance: {{ .ctx.Release.Name }}
 {{- end -}}
 
 {{/*
+NetworkPolicyPeer selecting the pods that run the app image (app, worker,
+setup Jobs, cron jobs), the only clients of the bundled services; "also"
+adds further components of this chart.
+Usage: include "philomena.networkPolicy.clients" (dict "ctx" . "also" (list "public-dump"))
+*/}}
+{{- define "philomena.networkPolicy.clients" -}}
+- podSelector:
+    matchLabels:
+      {{- include "philomena.selectorLabels" .ctx | nindent 6 }}
+    matchExpressions:
+      - key: app.kubernetes.io/component
+        operator: In
+        values:
+          {{- concat (list "app" "worker" "cron" "preflight" "setup") (.also | default list) | toYaml | nindent 10 }}
+{{- end -}}
+
+{{/*
+NetworkPolicyEgressRule for name resolution through the cluster DNS.
+*/}}
+{{- define "philomena.networkPolicy.dns" -}}
+- to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+  ports:
+    - port: 53
+      protocol: UDP
+    - port: 53
+      protocol: TCP
+{{- end -}}
+
+{{/*
 Database host the public dump reads from: publicDump.sourceHost when set,
 the bundled cluster's -ro service when it has replicas, otherwise the host
 the app uses.
