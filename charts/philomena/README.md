@@ -482,42 +482,18 @@ NetworkPolicies. With them:
   PostgreSQL. OpenSearch, Valkey and mediaproc do not authenticate their
   clients, so this is what keeps other pods of the cluster out.
   `networkPolicy.extraFrom` lets more peers in, e.g. a monitoring namespace;
-- the services reach nothing but their own replicas and the cluster DNS
-  (`k8s-app: kube-dns` pods in `kube-system`), mediaproc nothing at all.
+- OpenSearch and Valkey reach nothing but their own replicas and the cluster
+  DNS (`k8s-app: kube-dns` pods in `kube-system`), mediaproc nothing at all.
   Neither another pod nor an address outside the cluster is reachable from
   them.
 
-PostgreSQL needs two exceptions, which is what `networkPolicy.postgresql` is
-for:
+PostgreSQL is only restricted inwards. Its outgoing connections stay open:
+the CloudNativePG instances do not run without the Kubernetes API, and they
+upload WAL and backups to the object store themselves. The operator is let
+in from `networkPolicy.postgresql.operatorNamespace` (`cnpg-system`).
 
-```yaml
-networkPolicy:
-  enabled: true
-  postgresql:
-    apiServer:
-      cidrs:
-        - 203.0.113.10/32
-```
-
-- **Kubernetes API.** The CloudNativePG instances do not run without it, so
-  `apiServer.cidrs` is required: the addresses listed by
-  `kubectl get endpointslices -n default kubernetes` (the nodes of the
-  control plane on most clusters), and `apiServer.ports` when the API
-  listens on neither 6443 nor 443. A policy that misses the API server
-  leaves the instance pods unable to start. Cilium does not match cluster
-  nodes by address unless `policy-cidr-match-mode` includes `nodes`; where
-  that is not an option, set `networkPolicy.postgresql.enabled: false` and
-  write a CiliumNetworkPolicy for the database instead.
-- **Backups.** The instances upload WAL and backups to the object store
-  themselves, and download from it on recovery. With `postgresql.backups`
-  enabled the chart refuses to render until
-  `networkPolicy.postgresql.extraEgress` has a rule, e.g. port 443 of the
-  provider's address range. That is the one way out of the cluster the
-  database then has.
-
-The operator is let in from `networkPolicy.postgresql.operatorNamespace`
-(`cnpg-system`). The policies do not restrict the app pods themselves, which
-talk to S3, SMTP and other sites.
+The policies do not restrict the app pods themselves, which talk to S3, SMTP
+and other sites.
 
 ## Values
 
@@ -578,4 +554,4 @@ in full, and `values.schema.json` rejects misspelled keys.
 | `externalMediaproc.addr` | External mediaproc (`host:port`) | `""` |
 | `networkPolicy.enabled` | NetworkPolicies isolating the bundled services | `false` |
 | `networkPolicy.extraFrom` | Extra peers allowed into the bundled services | `[]` |
-| `networkPolicy.postgresql.*` | PostgreSQL policy: `enabled`, `apiServer.cidrs` (required), `apiServer.ports`, `operatorNamespace`, `extraEgress` | enabled, ports 443 and 6443, `cnpg-system` |
+| `networkPolicy.postgresql.operatorNamespace` | Namespace of the CloudNativePG operator, let into PostgreSQL | `cnpg-system` |

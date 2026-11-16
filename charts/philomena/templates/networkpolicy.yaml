@@ -3,7 +3,8 @@
 One policy per bundled service, for both directions. In: the pods running
 the app image on the service's port, the service's own pods and
 networkPolicy.extraFrom. Out: the service's own pods and the cluster DNS,
-which leaves no way out of the cluster.
+which leaves no way out of the cluster. PostgreSQL is only restricted
+inwards: its instances need the Kubernetes API and the backup object store.
 */}}
 {{- $np := .Values.networkPolicy }}
 {{- if .Values.opensearch.enabled }}
@@ -112,14 +113,7 @@ spec:
         {{- toYaml . | nindent 8 }}
     {{- end }}
 {{- end }}
-{{- if and .Values.postgresql.enabled $np.postgresql.enabled }}
-{{- $pg := $np.postgresql }}
-{{- if not $pg.apiServer.cidrs }}
-{{- fail "networkPolicy.postgresql.apiServer.cidrs is required: the CloudNativePG instances have to reach the Kubernetes API server (addresses: kubectl get endpointslices -n default kubernetes). Set networkPolicy.postgresql.enabled to false to leave the database without a policy." }}
-{{- end }}
-{{- if and .Values.postgresql.backups.enabled (not $pg.extraEgress) }}
-{{- fail "postgresql.backups is enabled: networkPolicy.postgresql.extraEgress has to allow the object store, or WAL archiving and backups fail" }}
-{{- end }}
+{{- if .Values.postgresql.enabled }}
 {{- /* Instances, the Jobs that create them and poolers */}}
 {{- $self := dict "cnpg.io/cluster" (include "philomena.postgresql.fullname" .) }}
 ---
@@ -130,14 +124,14 @@ metadata:
   labels:
     {{- include "philomena.labels" . | nindent 4 }}
   annotations:
-    kubernetes.io/description: "Only the app pods and the CloudNativePG operator may reach PostgreSQL, and it reaches nothing but its own instances and the Kubernetes API."
+    kubernetes.io/description: "Only the app pods and the CloudNativePG operator may reach PostgreSQL."
 spec:
   podSelector:
     matchLabels:
       {{- toYaml $self | nindent 6 }}
+  # Not Egress: see the top of the file
   policyTypes:
     - Ingress
-    - Egress
   ingress:
     - from:
         {{- include "philomena.networkPolicy.clients" (dict "ctx" . "also" (list "public-dump")) | nindent 8 }}
@@ -151,7 +145,7 @@ spec:
     - from:
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: {{ $pg.operatorNamespace }}
+              kubernetes.io/metadata.name: {{ $np.postgresql.operatorNamespace }}
           podSelector:
             matchLabels:
               app.kubernetes.io/name: cloudnative-pg
@@ -161,25 +155,6 @@ spec:
     {{- with $np.extraFrom }}
     - from:
         {{- toYaml . | nindent 8 }}
-    {{- end }}
-  egress:
-    - to:
-        - podSelector:
-            matchLabels:
-              {{- toYaml $self | nindent 14 }}
-    {{- include "philomena.networkPolicy.dns" . | nindent 4 }}
-    # The instance manager works against the Kubernetes API
-    - to:
-        {{- range $pg.apiServer.cidrs }}
-        - ipBlock:
-            cidr: {{ . }}
-        {{- end }}
-      ports:
-        {{- range $pg.apiServer.ports }}
-        - port: {{ . | int }}
-        {{- end }}
-    {{- with $pg.extraEgress }}
-    {{- toYaml . | nindent 4 }}
     {{- end }}
 {{- end }}
 {{- end }}

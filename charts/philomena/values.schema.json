@@ -963,37 +963,9 @@
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "enabled": {
-              "type": "boolean"
-            },
-            "apiServer": {
-              "type": "object",
-              "additionalProperties": false,
-              "properties": {
-                "cidrs": {
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  }
-                },
-                "ports": {
-                  "type": "array",
-                  "minItems": 1,
-                  "items": {
-                    "type": "integer"
-                  }
-                }
-              }
-            },
             "operatorNamespace": {
               "type": "string",
               "minLength": 1
-            },
-            "extraEgress": {
-              "type": "array",
-              "items": {
-                "type": "object"
-              }
             }
           }
         }
