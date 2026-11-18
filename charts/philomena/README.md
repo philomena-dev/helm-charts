@@ -39,8 +39,8 @@ external alternative:
 | Service | Subchart | Needs | External alternative | Injected as |
 | :------ | :------- | :---- | :------------------- | :---------- |
 | PostgreSQL | [CloudNativePG `cluster`](https://github.com/cloudnative-pg/charts/tree/main/charts/cluster) 0.9.0, aliased `postgresql` | the CNPG operator | `externalDatabase.*` | `DATABASE_URL`, `PG*` |
-| OpenSearch | [`opensearch`](https://github.com/opensearch-project/helm-charts/tree/main/charts/opensearch) 3.9.0 | `vm.max_map_count` on the nodes | `externalOpensearch.url` | `OPENSEARCH_URL` |
-| Valkey | [`valkey`](https://github.com/valkey-io/valkey-helm) 0.12.1 | | `externalValkey.host` | `REDIS_HOST` |
+| OpenSearch | [`opensearch`](https://github.com/opensearch-project/helm-charts/tree/main/charts/opensearch) 3.10.0 | `vm.max_map_count` on the nodes | `externalOpensearch.url` | `OPENSEARCH_URL` |
+| Valkey | [`valkey`](https://github.com/valkey-io/valkey-helm) 1.0.0 | | `externalValkey.host` | `REDIS_HOST` |
 | Secrets sync | [`infisical-secret`](../infisical-secret/), aliased `infisical`, off by default | the Infisical operator | `existingSecret` | `envFrom` |
 
 Everything under `postgresql`, `opensearch`, `valkey` and `infisical` is
@@ -255,9 +255,16 @@ For an external cluster, set `opensearch.enabled: false` and
 
 Valkey holds the job queue and carries PubSub between the app and the
 worker. The app connects without authentication on port 6379. The bundled instance has no volume by default
-(`valkey.dataStorage.enabled`), so jobs queued at the moment it restarts are
+(`valkey.persistence.enabled`), so jobs queued at the moment it restarts are
 lost. For an external instance, set `valkey.enabled: false` and
 `externalValkey.host`.
+
+Chart 1.2.0 moved to version 1.0 of the Valkey subchart, which refuses the
+values it renamed: `valkey.dataStorage` is now `valkey.persistence`
+(`requestedSize` is `size`, `className` is `storageClass`), and the subchart's
+[upgrade notes](https://github.com/valkey-io/valkey-helm/blob/main/valkey/UPGRADE.md)
+list the rest. Remove or rename them before upgrading. Valkey restarts once
+on that upgrade.
 
 ## mediaproc
 

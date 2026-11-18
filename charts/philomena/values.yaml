@@ -543,7 +543,7 @@ publicDump:
   # must match the database's
   image:
     repository: postgres
-    tag: 18.6-alpine
+    tag: 18.7-alpine
     pullPolicy: IfNotPresent
   podSecurityContext:
     seccompProfile:
@@ -692,10 +692,14 @@ valkey:
   nodeSelector: {}
   # Valkey holds the job queue and caches. Without a volume, jobs that are
   # queued while it restarts are lost.
-  dataStorage:
+  persistence:
     enabled: false
-    # requestedSize: 5Gi
-    # className: ""  # empty = cluster default
+    # size: 5Gi
+    # storageClass: ""  # empty = cluster default
+  # Starts the new pod before stopping the old one. Set to Recreate when
+  # persistence is enabled: a rolling update cannot hand a ReadWriteOnce
+  # volume over to the new pod.
+  deploymentStrategy: RollingUpdate
 
 externalValkey:
   # When set, injected as REDIS_HOST. The app always connects on the default

@@ -54,7 +54,7 @@ jobs:
 
       - uses: actions/setup-node@v7.1.0
         with:
-          node-version: 24
+          node-version: 26
 
       # PhilomenaCSS, the stylesheet of the landing page (site/package.json)
       - name: Install the stylesheet
